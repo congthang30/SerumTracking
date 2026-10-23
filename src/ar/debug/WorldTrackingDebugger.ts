@@ -425,7 +425,12 @@ export class WorldTrackingDebugger {
     this.rootCauseReports = [];
     this.bridgeQueue = [];
     this.refreshThresholds();
-    if (!this.enabled) return;
+    if (!this.enabled) {
+      if (IS_DEV_BUILD) {
+        console.log('[WORLD_AR][DEBUG_DISABLED] Add ?debugWorldTracking=1 to the page URL to print tracking diagnostics in Safari and the Vite terminal.');
+      }
+      return;
+    }
 
     this.startBridge();
     this.record('SESSION', 'SESSION_STARTED', {
@@ -871,7 +876,23 @@ export class WorldTrackingDebugger {
     if (this.activePipelineEventRecords) this.activePipelineEventRecords.push(record);
     this.pruneRing(monotonicMs);
     this.updateCaptures(record);
-    if (options.bridge && this.shouldBridgeEvent(category, eventName, monotonicMs)) this.enqueueBridge(record);
+    if (options.bridge && this.shouldBridgeEvent(category, eventName, monotonicMs)) {
+      this.enqueueBridge(record);
+      if (IS_DEV_BUILD && typeof console !== 'undefined') {
+        const frame = record.xr8FrameId ?? record.trackingFrameSequence ?? '-';
+        const diagnosticPayload = {
+          ...record.payload,
+          sequenceId: record.sequenceId,
+          monotonicMs: record.monotonicMs,
+          xr8FrameId: record.xr8FrameId,
+          trackingFrameSequence: record.trackingFrameSequence,
+          trackingState: record.trackingState,
+        };
+        console.log(
+          `[WORLD_AR][${record.sessionId}][${record.timestamp}][F${frame}][${record.category}][${record.eventName}] ${JSON.stringify(diagnosticPayload)}`
+        );
+      }
+    }
     if (options.capture) this.startCaptureFor(record);
     return record;
   }
