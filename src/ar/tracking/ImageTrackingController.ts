@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ImagePose } from '../../types/ar';
 import { logger } from '../../utils/logger';
 import { isARTraceEnabled, reportCameraDiagnostic, traceAR } from '../xr/camera-fix';
+import { worldTrackingDebugger } from '../debug/WorldTrackingDebugger';
 
 type TrackingState = 'SCANNING' | 'STABILIZING' | 'ANCHORED';
 
@@ -32,6 +33,7 @@ export class ImageTrackingController {
   private worldTrackingNormal = false;
   private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
   private worldTrackingReason = 'INITIALIZING';
+  private worldTrackingRecoveryUntil = 0;
   private expectedWorldMatrix: THREE.Matrix4 | null = null;
   private handoffFailureLogged = false;
   private lastHandoffFailureReason = '';
@@ -160,12 +162,19 @@ export class ImageTrackingController {
   }
 
   public setWorldTrackingStatus(status: 'NORMAL' | 'LIMITED', reason = 'UNDEFINED'): void {
+    const now = performance.now();
     const changed = status !== this.worldTrackingStatus || reason !== this.worldTrackingReason;
     const trackingReady = status === 'NORMAL' && reason !== 'INITIALIZING';
     const normalChanged = trackingReady !== this.worldTrackingNormal;
     this.worldTrackingStatus = status;
     this.worldTrackingReason = reason;
     this.worldTrackingNormal = trackingReady;
+    if (normalChanged && trackingReady) {
+      // XR8 can shift the camera origin while SLAM hands off from initialization.
+      this.worldTrackingRecoveryUntil = now + 1500;
+    } else if (!trackingReady) {
+      this.worldTrackingRecoveryUntil = 0;
+    }
 
     if (normalChanged && this.state !== 'ANCHORED') this.resetStabilityWindow();
     this.sampleCameraPose('trackingstatus');
@@ -636,9 +645,9 @@ export class ImageTrackingController {
 
   /**
    * Detects impossible camera pose jumps after handoff. XR8 exposes tracking
-   * status but no origin-change matrix in this runtime. During LIMITED only,
-   * a >1m pose jump in one frame is treated as a coordinate-frame change and
-   * the world anchor is transformed by the same camera-frame delta.
+   * status but no origin-change matrix in this runtime. During LIMITED or just
+   * after SLAM recovers, a >1m pose jump in one frame is treated as a possible
+   * coordinate-frame change and the world anchor follows the camera-frame delta.
    */
   private monitorAnchorCameraPose(): void {
     if (!this.camera || !this.isWorldCameraPoseValid()) {
@@ -681,7 +690,8 @@ export class ImageTrackingController {
         this.hasPreviousCameraVelocity = false;
       }
       if (isShortStep && isPoseDiscontinuity) {
-        const shouldRebase = this.worldTrackingStatus === 'LIMITED' &&
+        const trackingRecoveryWindowActive = now <= this.worldTrackingRecoveryUntil;
+        const shouldRebase = (this.worldTrackingStatus === 'LIMITED' || trackingRecoveryWindowActive) &&
           (translationStep >= ImageTrackingController.ORIGIN_SHIFT_REBASE_DISTANCE_M ||
             rotationStep >= THREE.MathUtils.degToRad(ImageTrackingController.ORIGIN_SHIFT_REBASE_ROTATION_DEG));
 
@@ -728,6 +738,8 @@ export class ImageTrackingController {
   ): boolean {
     const parent = this.worldAnchorGroup.parent;
     if (!parent || this.productRoot.parent !== this.worldAnchorGroup) return false;
+    const debugAnchorBefore = worldTrackingDebugger.captureTransform(this.worldAnchorGroup);
+    const debugProductBefore = worldTrackingDebugger.captureTransform(this.productRoot);
 
     parent.updateWorldMatrix(true, false);
     this.worldAnchorGroup.updateWorldMatrix(true, false);
@@ -775,10 +787,49 @@ export class ImageTrackingController {
       this.worldAnchorGroup.updateMatrix();
       this.worldAnchorGroup.updateWorldMatrix(true, true);
       this.productRoot.updateWorldMatrix(true, true);
+      worldTrackingDebugger.recordTransformWrite(
+        'ANCHOR',
+        'COMPENSATION_ROLLED_BACK',
+        'ImageTrackingController.rebaseWorldAnchorForCameraFrameShift',
+        this.worldAnchorGroup,
+        debugAnchorBefore,
+        'Product world matrix verification failed; restore previous anchor transform.',
+        {
+          attemptedCompensationMatrix: worldFrameDelta.toArray(),
+          attemptedProductWorldMatrix: expectedNewProductWorld.toArray(),
+          verificationError: matrixError,
+          translationStepM: translationStep,
+          rotationStepDeg: THREE.MathUtils.radToDeg(rotationStep),
+        }
+      );
       return false;
     }
 
     this.expectedWorldMatrix = this.productRoot.matrixWorld.clone();
+    worldTrackingDebugger.recordTransformWrite(
+      'ANCHOR',
+      'COMPENSATION_APPLIED',
+      'ImageTrackingController.rebaseWorldAnchorForCameraFrameShift',
+      this.worldAnchorGroup,
+      debugAnchorBefore,
+      'Rebase anchor by camera frame delta after a large pose discontinuity while tracking is LIMITED or in recovery window.',
+      {
+        compensationMatrix: worldFrameDelta.toArray(),
+        oldCameraWorldMatrix: oldCameraWorld.toArray(),
+        newCameraWorldMatrix: newCameraWorld.toArray(),
+        productWorldBefore: oldProductWorld.toArray(),
+        productWorldAfter: this.productRoot.matrixWorld.toArray(),
+        productWorldDeltaFromCompensation: this.productRoot.matrixWorld.clone().multiply(oldProductWorld.clone().invert()).toArray(),
+        productTransformBefore: debugProductBefore,
+        productTransformAfter: worldTrackingDebugger.captureTransform(this.productRoot),
+        matrixVerificationError: matrixError,
+        translationStepM: translationStep,
+        rotationStepDeg: THREE.MathUtils.radToDeg(rotationStep),
+        elapsedMs,
+        trackingStatus: this.worldTrackingStatus,
+        trackingReason: this.worldTrackingReason,
+      }
+    );
     traceAR('WORLD_ANCHOR_FRAME_REBASE_DETAILS', {
       translationM: translationStep,
       rotationDeg: THREE.MathUtils.radToDeg(rotationStep),
@@ -827,6 +878,8 @@ export class ImageTrackingController {
     this.targetGroup.updateWorldMatrix(true, true);
     this.productRoot.updateWorldMatrix(true, true);
     this.worldAnchorGroup.updateWorldMatrix(true, false);
+    const debugProductBefore = worldTrackingDebugger.captureTransform(this.productRoot);
+    const debugAnchorBefore = worldTrackingDebugger.captureTransform(this.worldAnchorGroup);
     const capturedWorldMatrix = this.productRoot.matrixWorld.clone();
     const originalPosition = this.productRoot.position.clone();
     const originalQuaternion = this.productRoot.quaternion.clone();
@@ -882,6 +935,7 @@ export class ImageTrackingController {
 
     const finalError = this.maxMatrixDifference(this.productRoot.matrixWorld, capturedWorldMatrix);
     if (finalError > ImageTrackingController.MATRIX_ERROR_TOLERANCE) {
+      const attemptedWorldMatrix = this.productRoot.matrixWorld.toArray();
       originalParent.add(this.productRoot);
       this.productRoot.position.copy(originalPosition);
       this.productRoot.quaternion.copy(originalQuaternion);
@@ -889,6 +943,21 @@ export class ImageTrackingController {
       this.productRoot.updateMatrix();
       this.productRoot.updateWorldMatrix(true, true);
       this.worldAnchorGroup.visible = oldWorldAnchorVisibility;
+      worldTrackingDebugger.recordTransformWrite(
+        'MODEL',
+        'HANDOFF_ROLLED_BACK',
+        'ImageTrackingController.detachIntoWorldAnchor',
+        this.productRoot,
+        debugProductBefore,
+        'World-matrix verification failed after reparent; restore original parent and local TRS.',
+        {
+          attemptedParent: this.worldAnchorGroup.name || this.worldAnchorGroup.type,
+          restoredParent: originalParent.name || originalParent.type,
+          attemptedWorldMatrix,
+          capturedWorldMatrix: capturedWorldMatrix.toArray(),
+          verificationError: finalError,
+        }
+      );
       traceAR('HANDOFF_ROLLED_BACK', {
         reason: 'world transform verification failed after reparent',
         maxMatrixError: finalError,
@@ -899,6 +968,35 @@ export class ImageTrackingController {
     }
 
     this.expectedWorldMatrix = capturedWorldMatrix;
+    worldTrackingDebugger.recordTransformWrite(
+      'MODEL',
+      'HANDOFF_REPARENT',
+      'ImageTrackingController.detachIntoWorldAnchor',
+      this.productRoot,
+      debugProductBefore,
+      'Reparent ProductRoot from ImageTargetAnchor to SerumWorldAnchor while preserving its captured world matrix.',
+      {
+        oldParent: originalParent.name || originalParent.type,
+        newParent: this.worldAnchorGroup.name || this.worldAnchorGroup.type,
+        capturedWorldMatrix: capturedWorldMatrix.toArray(),
+        finalWorldMatrix: this.productRoot.matrixWorld.toArray(),
+        worldMatrixError: finalError,
+        anchorTransformBefore: debugAnchorBefore,
+      }
+    );
+    worldTrackingDebugger.recordTransformWrite(
+      'ANCHOR',
+      'WORLD_ANCHOR_ESTABLISHED',
+      'ImageTrackingController.detachIntoWorldAnchor',
+      this.worldAnchorGroup,
+      debugAnchorBefore,
+      'Establish diagnostic world-anchor reference after verified image-to-world handoff.',
+      {
+        capturedProductWorldMatrix: capturedWorldMatrix.toArray(),
+        productTransformAfter: worldTrackingDebugger.captureTransform(this.productRoot),
+        worldMatrixError: finalError,
+      }
+    );
     this.worldAnchorGroup.visible = true;
     this.isTracked = true;
     this.handoffFailureLogged = false;
@@ -998,6 +1096,8 @@ export class ImageTrackingController {
 
   /** Applies the existing 8th Wall image pose and upright model fit. */
   private applyPose(pose: ImagePose, rotationDeg = 0, instant = false): void {
+    const debugTargetBefore = worldTrackingDebugger.captureTransform(this.targetGroup);
+    const debugProductBefore = worldTrackingDebugger.captureTransform(this.productRoot);
     this.tmpTargetQuat.copy(pose.quaternion).normalize();
 
     if (rotationDeg !== 0) {
@@ -1035,15 +1135,18 @@ export class ImageTrackingController {
       this.productRoot.position.set(0, productOffsetY, 0);
       this.productRoot.rotation.x = targetRotX;
       this.hasPose = true;
+      this.recordPoseTransformWrites(debugTargetBefore, debugProductBefore, pose, rotationDeg, 'Initial or instant image-target pose; no temporal smoothing was applied.');
       return;
     }
 
     const elapsed = (now - this.lastPoseTimestamp) / 1000;
+    let poseWriteReason = 'Image target pose updated with the existing velocity-adaptive smoothing.';
     if (!Number.isFinite(elapsed) || elapsed > 0.45) {
       this.targetGroup.position.copy(pose.position);
       this.targetGroup.quaternion.copy(this.tmpTargetQuat);
       this.targetGroup.scale.setScalar(s);
       this.seedPoseFilter(pose.position, this.tmpTargetQuat, s, now);
+      poseWriteReason = 'Image pose filter re-seeded because the previous sample was stale or had invalid elapsed time.';
     } else {
       const dt = THREE.MathUtils.clamp(elapsed, 1 / 240, 0.25);
       this.tmpPositionDelta.subVectors(pose.position, this.previousRawPosition);
@@ -1068,6 +1171,43 @@ export class ImageTrackingController {
     this.storeRawPose(pose.position, this.tmpTargetQuat, s, now);
     this.productRoot.position.set(0, productOffsetY, 0);
     this.productRoot.rotation.x = targetRotX;
+    this.recordPoseTransformWrites(debugTargetBefore, debugProductBefore, pose, rotationDeg, poseWriteReason);
+  }
+
+  private recordPoseTransformWrites(
+    targetBefore: ReturnType<typeof worldTrackingDebugger.captureTransform>,
+    productBefore: ReturnType<typeof worldTrackingDebugger.captureTransform>,
+    pose: ImagePose,
+    rotationDeg: number,
+    reason: string
+  ): void {
+    const posePayload = {
+      targetName: pose.name,
+      rawPosition: [pose.position.x, pose.position.y, pose.position.z],
+      rawQuaternion: [pose.quaternion.x, pose.quaternion.y, pose.quaternion.z, pose.quaternion.w],
+      rawScale: pose.scale,
+      scaledWidth: pose.scaledWidth ?? null,
+      scaledHeight: pose.scaledHeight ?? null,
+      rotationDeg,
+    };
+    worldTrackingDebugger.recordTransformWrite(
+      'ANCHOR',
+      'IMAGE_TARGET_POSE_APPLIED',
+      'ImageTrackingController.applyPose',
+      this.targetGroup,
+      targetBefore,
+      reason,
+      posePayload
+    );
+    worldTrackingDebugger.recordTransformWrite(
+      'MODEL',
+      'PRODUCT_IMAGE_FIT_APPLIED',
+      'ImageTrackingController.applyPose',
+      this.productRoot,
+      productBefore,
+      'Set ProductRoot fit scale, vertical centering offset, and upright X rotation from the current target dimensions.',
+      { ...posePayload, poseWriteReason: reason }
+    );
   }
 
   private seedPoseFilter(position: THREE.Vector3, quaternion: THREE.Quaternion, scale: number, timestamp: number): void {
@@ -1098,6 +1238,16 @@ export class ImageTrackingController {
     if (this.state === next) return;
     const previous = this.state;
     this.state = next;
+    worldTrackingDebugger.recordEvent('ANCHOR', 'ANCHOR_STATE_CHANGED', {
+      previous,
+      next,
+      reason,
+      imageTracked: this.isTracked,
+      worldTrackingStatus: this.worldTrackingStatus,
+      worldTrackingReason: this.worldTrackingReason,
+      targetParent: this.targetGroup.parent?.name || this.targetGroup.parent?.type || null,
+      productParent: this.productRoot.parent?.name || this.productRoot.parent?.type || null,
+    }, { bridge: true });
     reportCameraDiagnostic('Anchor state', `${previous} -> ${next}; ${reason}`);
     traceAR('ANCHOR_STATE', {
       previous,

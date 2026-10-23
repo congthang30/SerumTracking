@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { ImagePose } from '../../types/ar';
 import { loadImageTargetData, ImageTargetData } from '../config/targets';
-import { installXR8ConsoleBridge, isCameraDebugEnabled, reportCameraDiagnostic, traceAR } from '../xr/camera-fix';
+import { reportCameraDiagnostic, traceAR } from '../xr/camera-fix';
 import { logger } from '../../utils/logger';
+import type { XR8FrameContext } from '../debug/WorldTrackingDebugger';
 
 // Expose THREE globally for 8th Wall's Threejs pipeline module
 (window as any).THREE = THREE;
@@ -12,6 +13,10 @@ export interface EightWallCallbacks {
   onTargetUpdated: (pose: ImagePose) => void;
   onTargetLost: (name: string) => void;
   onWorldTrackingStatus?: (status: 'NORMAL' | 'LIMITED', reason?: string) => void;
+  onFrameUpdate?: (context: XR8FrameContext) => void;
+  onPipelineEventPhase?: (phase: 'START' | 'END') => void;
+  onPipelineState?: (state: 'PAUSED' | 'RESUMED' | 'DETACHED') => void;
+  onCameraStatus?: (payload: Record<string, unknown>, video?: HTMLVideoElement | null) => void;
   onCameraStarted: (info: { scene: THREE.Scene; camera: THREE.Camera; renderer?: THREE.WebGLRenderer }) => void;
   onError: (message: string) => void;
   onProgress?: (stage: string) => void;
@@ -103,10 +108,18 @@ export class EightWallManager {
   private arSessionStartedAt = 0;
   private runtimeVersion = 'unknown';
   private hasLoggedImageScanning = false;
-  private restoreXR8ConsoleBridge: (() => void) | null = null;
   private orientationFixTimers: number[] = [];
   private startupTimeoutTimer: number | null = null;
   private cancelPendingStart: (() => void) | null = null;
+
+  private dispatchPipelineEvent(cb: EightWallCallbacks, callback: () => void): void {
+    cb.onPipelineEventPhase?.('START');
+    try {
+      callback();
+    } finally {
+      cb.onPipelineEventPhase?.('END');
+    }
+  }
 
   public get isRunning(): boolean {
     return this.running;
@@ -236,7 +249,6 @@ export class EightWallManager {
       traceAR('XR8_SDK_LOAD_FAILED', { attemptedSources: [LOCAL_XR_URL, CDN_XR_URL, '/external/xr/xr.js'] }, 'error');
       throw new Error('8th Wall XR Engine script could not be loaded.');
     }
-    this.restoreXR8ConsoleBridge = installXR8ConsoleBridge();
     traceAR('XR8_SDK_READY', { xr8Available: true });
 
     const XR8 = (window as any).XR8;
@@ -276,13 +288,11 @@ export class EightWallManager {
         imageTargetData = [target];
       } catch (err) {
         traceAR('IMAGE_TARGET_CONFIG_LOAD_FAILED', { path: 'targets/serum.json', error: String(err), tryingFallback: true }, 'warn');
-        console.warn('Fallback loading targets/serum.json:', err);
         try {
           const fallbackTarget = await loadImageTargetData('assets/image-target/serum-target.json');
           imageTargetData = [fallbackTarget];
         } catch (e2) {
           traceAR('IMAGE_TARGET_CONFIG_LOAD_FAILED', { path: 'assets/image-target/serum-target.json', error: String(e2), activeTargetCount: 0 }, 'error');
-          console.error('All target loaders failed:', e2);
         }
       }
     }
@@ -323,46 +333,25 @@ export class EightWallManager {
       modules.push(XR8.GlTextureRenderer.pipelineModule());
       modules.push(XR8.Threejs.pipelineModule());
       modules.push(XR8.XrController.pipelineModule());
-      const reportRenderSize = ({ videoWidth, videoHeight, canvasWidth, canvasHeight }: any) => {
-        const rect = canvas.getBoundingClientRect();
-        reportCameraDiagnostic(
-          'XR8 render size',
-          `camera ${videoWidth}x${videoHeight} | render ${canvasWidth}x${canvasHeight} | canvas backing ${canvas.width}x${canvas.height} | CSS ${Math.round(rect.width)}x${Math.round(rect.height)}`
-        );
-      };
       modules.push({
-        name: 'serum-camera-diagnostics',
+        name: 'serum-scene-updates',
+        onUpdate: (context: XR8FrameContext) => cb.onFrameUpdate?.(context),
+        onPaused: () => cb.onPipelineState?.('PAUSED'),
+        onResume: () => cb.onPipelineState?.('RESUMED'),
         onCameraStatusChange: ({ status, stream, video }: any) => {
-          traceAR('XR8_CAMERA_STATUS', {
-            status,
-            streamAvailable: Boolean(stream),
+          const track = stream?.getVideoTracks?.()[0];
+          const settings = track?.getSettings?.();
+          cb.onCameraStatus?.({
+            status: String(status ?? 'UNKNOWN'),
             videoAvailable: Boolean(video),
-            secureContext: window.isSecureContext,
-          }, status === 'failed' ? 'error' : 'info');
-          if (status === 'hasStream') {
-            const track = stream?.getVideoTracks?.()[0];
-            const settings = track?.getSettings?.();
-            if (settings) {
-              traceAR('XR8_CAMERA_STREAM', {
-                status,
-                width: settings.width ?? null,
-                height: settings.height ?? null,
-                frameRate: settings.frameRate ?? null,
-                facingMode: settings.facingMode ?? null,
-              });
-              reportCameraDiagnostic(
-                'XR8 stream',
-                `${settings.width ?? '?'}x${settings.height ?? '?'}, ${settings.frameRate ?? '?'}fps, facing=${settings.facingMode ?? '?'}`
-              );
-            }
-          }
-          if (status === 'hasVideo' && video) {
-            traceAR('XR8_CAMERA_VIDEO_READY', { width: video.videoWidth, height: video.videoHeight });
-            reportCameraDiagnostic('XR8 video element', `${video.videoWidth}x${video.videoHeight}`);
-          }
+            videoWidth: typeof video?.videoWidth === 'number' ? video.videoWidth : null,
+            videoHeight: typeof video?.videoHeight === 'number' ? video.videoHeight : null,
+            width: typeof settings?.width === 'number' ? settings.width : null,
+            height: typeof settings?.height === 'number' ? settings.height : null,
+            frameRate: typeof settings?.frameRate === 'number' ? settings.frameRate : null,
+            facingMode: typeof settings?.facingMode === 'string' ? settings.facingMode : null,
+          }, video ?? null);
         },
-        onStart: reportRenderSize,
-        onVideoSizeChange: reportRenderSize,
       });
     } catch (e) {
       this.isStarting = false;
@@ -391,7 +380,7 @@ export class EightWallManager {
         `FOUND ${pose.name}; p=(${pose.position.x.toFixed(3)},${pose.position.y.toFixed(3)},${pose.position.z.toFixed(3)}) scale=${pose.scale.toFixed(3)}`
       );
       logger.log('info', `[8TH_WALL] 🎯 TARGET FOUND: "${pose.name}" pos=(${pose.position.x.toFixed(2)}, ${pose.position.y.toFixed(2)}, ${pose.position.z.toFixed(2)}) scale=${pose.scale.toFixed(3)}`);
-      cb.onTargetFound(pose);
+      this.dispatchPipelineEvent(cb, () => cb.onTargetFound(pose));
     };
     const handleUpdated = (e: any) => {
       const pose = parseImagePose(e);
@@ -413,7 +402,7 @@ export class EightWallManager {
           scale: pose.scale,
         });
       }
-      cb.onTargetUpdated(pose);
+      this.dispatchPipelineEvent(cb, () => cb.onTargetUpdated(pose));
     };
     const handleLost = (e: any) => {
       const d = e?.detail ?? e;
@@ -426,7 +415,7 @@ export class EightWallManager {
       }, 'warn');
       reportCameraDiagnostic('Image Tracking', `LOST ${name || '(unknown target)'}`);
       logger.log('warn', `[8TH_WALL] ⚠️ TARGET LOST: "${name}"`);
-      cb.onTargetLost(name);
+      this.dispatchPipelineEvent(cb, () => cb.onTargetLost(name));
     };
     const handleWorldTrackingStatus = (e: any) => {
       const d = e?.detail ?? e;
@@ -439,7 +428,7 @@ export class EightWallManager {
         elapsedSinceSessionStartMs: Math.round(performance.now() - this.arSessionStartedAt),
       }, d?.status === 'NORMAL' ? 'info' : 'warn');
       logger.log('info', `[8TH_WALL] World tracking status=${String(d?.status ?? 'UNKNOWN')} reason=${reason}`);
-      cb.onWorldTrackingStatus?.(status, reason);
+      this.dispatchPipelineEvent(cb, () => cb.onWorldTrackingStatus?.(status, reason));
     };
 
     const triggerOrientationFix = () => {
@@ -539,6 +528,7 @@ export class EightWallManager {
           },
         ],
         onDetach: () => {
+          cb.onPipelineState?.('DETACHED');
           traceAR('XR8_PIPELINE_DETACHED', {
             elapsedSinceStartMs: this.arSessionStartedAt > 0 ? Math.round(performance.now() - this.arSessionStartedAt) : null,
             imageTargetClearRequested: this.imageTargetClearRequested,
@@ -554,8 +544,6 @@ export class EightWallManager {
           }
           this.clearOrientationFixTimers();
           this.cancelPendingStart?.();
-          this.restoreXR8ConsoleBridge?.();
-          this.restoreXR8ConsoleBridge = null;
         },
         onException: (e: any) => {
           const errMsg = String(e?.message ?? e);
@@ -573,7 +561,7 @@ export class EightWallManager {
           configuredImageTargetCount: this.configuredImageTargetCount,
           disableWorldTracking: false,
         });
-        XR8.run({ canvas, verbose: (import.meta as any).env?.DEV === true || isCameraDebugEnabled() });
+        XR8.run({ canvas, verbose: false });
       } catch (e) {
         traceAR('XR8_RUN_FAILED', { error: String(e) }, 'error');
         failStart(new Error(`XR8.run failed: ${String(e)}`));
@@ -628,8 +616,6 @@ export class EightWallManager {
       window.clearTimeout(this.imageTargetClearVerificationTimer);
       this.imageTargetClearVerificationTimer = null;
     }
-    this.restoreXR8ConsoleBridge?.();
-    this.restoreXR8ConsoleBridge = null;
     this.cancelPendingStart?.();
     this.clearStartupTimeoutTimer();
     try {

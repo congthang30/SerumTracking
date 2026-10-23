@@ -7,10 +7,9 @@ export interface LogEntry {
 
 class ClientLogger {
   public log(type: LogEntry['type'], ...args: any[]): void {
-    if ((import.meta as any).env?.DEV) {
-      const fn = (console as any)[type] || console.log;
-      fn(...args);
-    }
+    // Console logging is disabled; keep the API for existing callers.
+    void type;
+    void args;
   }
 
   public getEntries(): LogEntry[] {

@@ -107,8 +107,8 @@ export class SerumScene {
         contactShadow.position.set(0, -0.001, 0);
         this.rootAnchor.add(contactShadow);
       }
-    } catch (e) {
-      console.warn('[SerumScene] Could not setup contact shadow:', e);
+    } catch {
+      // Contact shadow is an optional visual enhancement.
     }
   }
 
@@ -166,8 +166,8 @@ export class SerumScene {
       topBoxGeo.dispose();
       topBoxMat.dispose();
       pmremGenerator.dispose();
-    } catch (e) {
-      console.warn('[SerumScene] Could not generate studio PMREM environment:', e);
+    } catch {
+      // The AR scene remains usable without the generated studio environment.
     }
   }
 

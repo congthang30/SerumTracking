@@ -10,6 +10,7 @@ import { Callout3DBadges } from '../ar/callouts/Callout3DBadges';
 import { ImageTrackingController } from '../ar/tracking/ImageTrackingController';
 import { EightWallManager } from '../ar/engine/EightWallManager';
 import { beginARTraceSession, traceAR } from '../ar/xr/camera-fix';
+import { worldTrackingDebugger } from '../ar/debug/WorldTrackingDebugger';
 
 export interface UseAREngineReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -81,6 +82,7 @@ export function useAREngine(): UseAREngineReturn {
   const animFrameRef = useRef<number | null>(null);
   const clockRef = useRef(new THREE.Clock());
   const animationDiagnosticFramesRef = useRef(0);
+  const modelAnimationStartedRef = useRef(false);
 
   // User drag-to-rotate state (Phase 6: rotates exclusively the serum bottle)
   const isPointerDownRef = useRef(false);
@@ -89,6 +91,21 @@ export function useAREngine(): UseAREngineReturn {
 
   // Simulation mode tabletop poster reference
   const posterMeshRef = useRef<THREE.Mesh | null>(null);
+
+  const startModelAnimation = useCallback(() => {
+    const model = modelRef.current;
+    if (modelAnimationStartedRef.current) return;
+    modelAnimationStartedRef.current = true;
+    if (!model?.mixer) return;
+
+    model.mixer.setTime(0);
+    for (const action of model.actions ?? []) {
+      action.reset();
+      action.play();
+    }
+    // Apply the first animated pose before the newly visible model is rendered.
+    model.mixer.update(0);
+  }, []);
 
   const toggleSimPoster = useCallback(() => {
     if (posterMeshRef.current) {
@@ -108,6 +125,8 @@ export function useAREngine(): UseAREngineReturn {
   }, []);
 
   const replaySequence = useCallback(() => {
+    if (!modelAnimationStartedRef.current) return;
+
     if (timelineRef.current) {
       timelineRef.current.reset();
       timelineRef.current.start();
@@ -144,6 +163,7 @@ export function useAREngine(): UseAREngineReturn {
     isStartingRef.current = true;
     const canvas = canvasRef.current;
     if (!isSimulation) {
+      worldTrackingDebugger.start();
       beginARTraceSession();
       traceAR('SERUM_AR_BOOT_START', { simulation: false });
     }
@@ -213,7 +233,6 @@ export function useAREngine(): UseAREngineReturn {
       }
     } catch (err: any) {
       if (!isSimulation) traceAR('SERUM_AR_BOOT_FAILED', { error: String(err) }, 'error');
-      console.error('AR Boot Error:', err);
       hasLoadedModelRef.current = false;
     } finally {
       isStartingRef.current = false;
@@ -253,6 +272,7 @@ export function useAREngine(): UseAREngineReturn {
     });
 
     sceneObj.rootAnchor.visible = true;
+    startModelAnimation();
     timelineRef.current?.start();
 
     // Start Simulation Animation Loop
@@ -275,6 +295,17 @@ export function useAREngine(): UseAREngineReturn {
       onCameraStarted: ({ scene, camera, renderer }) => {
         sceneObj.attachToXRScene(scene, camera, renderer);
         trackingRef.current?.setCamera(camera);
+        worldTrackingDebugger.setSceneObjects({
+          scene,
+          camera,
+          renderer: renderer ?? null,
+          targetAnchor: sceneObj.rootAnchor,
+          worldAnchor: sceneObj.worldAnchorGroup,
+          productRoot: sceneObj.productRoot,
+          storyGroup: sceneObj.userRotationGroup,
+          bottleGroup: modelRef.current?.bottleGroup ?? null,
+          modelRoot: modelRef.current?.modelScene ?? null,
+        });
         const env = sceneObj.getStudioEnvMap();
         if (env && hydrationFXRef.current) {
           hydrationFXRef.current.setEnvironmentMap(env);
@@ -283,8 +314,9 @@ export function useAREngine(): UseAREngineReturn {
         calloutBadgesRef.current?.updateCamera(camera);
       },
       onTargetFound: (pose) => {
-        const anchoredNow = trackingRef.current?.handleImageFound(pose, 0) ?? false;
-        if (anchoredNow) {
+        const firstTargetFound = trackingRef.current?.handleImageFound(pose, 0) ?? false;
+        if (firstTargetFound) {
+          startModelAnimation();
           timelineRef.current?.start();
         }
       },
@@ -293,18 +325,26 @@ export function useAREngine(): UseAREngineReturn {
         if (anchoredNow) manager.disableImageTargets();
       },
       onTargetLost: () => trackingRef.current?.handleImageLost(),
-      onWorldTrackingStatus: (status, reason) => trackingRef.current?.setWorldTrackingStatus(status, reason),
-      onError: (msg) => {
-        console.error('[8TH_WALL] AR engine error:', msg);
+      onWorldTrackingStatus: (status, reason) => {
+        worldTrackingDebugger.recordTrackingStatus(status, reason ?? 'UNDEFINED');
+        trackingRef.current?.setWorldTrackingStatus(status, reason);
       },
+      onPipelineState: (state) => worldTrackingDebugger.recordPipelineState(state),
+      onPipelineEventPhase: (phase) => {
+        if (phase === 'START') worldTrackingDebugger.beginPipelineEvent();
+        else worldTrackingDebugger.endPipelineEvent();
+      },
+      onCameraStatus: (payload, video) => worldTrackingDebugger.recordCameraStatus(payload, video),
+      onFrameUpdate: (context) => {
+        if (worldTrackingDebugger.isEnabled) worldTrackingDebugger.beginFrame(context);
+        try {
+          renderFrame(false);
+        } finally {
+          if (worldTrackingDebugger.isEnabled) worldTrackingDebugger.endFrame();
+        }
+      },
+      onError: () => {},
     });
-
-    // 8th Wall runs its own camera pipeline, but updates custom 3D scene in sync
-    const loop = () => {
-      animFrameRef.current = requestAnimationFrame(loop);
-      renderFrame(false);
-    };
-    loop();
   };
 
   // Master Cinematic Animation Timeline (302 Frames @ 30 FPS = 10.07s):
@@ -319,11 +359,37 @@ export function useAREngine(): UseAREngineReturn {
   // Frame rendering and 60fps DOM projection pipeline
   const renderFrame = (driveRender: boolean) => {
     trackingRef.current?.inspectWorldAnchor();
+    const scene = sceneRef.current;
+    const debugStoryBefore = worldTrackingDebugger.captureTransform(scene?.userRotationGroup);
+    const debugBottleBefore = worldTrackingDebugger.captureTransform(modelRef.current?.bottleGroup);
+    const debugModelBefore = worldTrackingDebugger.captureTransform(modelRef.current?.modelScene);
     const dt = clockRef.current.getDelta();
     const safeDt = dt > 0.0001 && dt < 0.2 ? dt : 0.016;
 
     // 1. Update Master 6-Phase Story Timeline (1.0x original dynamic speed)
     const story = timelineRef.current?.update(safeDt);
+    if (scene?.userRotationGroup) {
+      worldTrackingDebugger.recordTransformWrite(
+        'MODEL',
+        'STORY_TIMELINE_TRANSFORM',
+        'ProductStoryTimeline.update',
+        scene.userRotationGroup,
+        debugStoryBefore,
+        'Existing story animation updated the model presentation group.',
+        { phase: story?.phase ?? null, sequenceTime: story?.sequenceTime ?? 0, deltaTimeSeconds: safeDt }
+      );
+    }
+    if (modelRef.current?.bottleGroup) {
+      worldTrackingDebugger.recordTransformWrite(
+        'MODEL',
+        'BOTTLE_TIMELINE_TRANSFORM',
+        'ProductStoryTimeline.update',
+        modelRef.current.bottleGroup,
+        debugBottleBefore,
+        'Existing story animation or user rotation updated the bottle group.',
+        { phase: story?.phase ?? null, sequenceTime: story?.sequenceTime ?? 0, userRotationY: timelineRef.current?.userBottleRotY ?? 0 }
+      );
+    }
     if (story) {
       if (story.is360Active !== is360Active) {
         setIs360Active(story.is360Active);
@@ -334,7 +400,7 @@ export function useAREngine(): UseAREngineReturn {
     }
 
     // 2. Update Master 3D Cinematic Animation
-    if (modelRef.current?.mixer) {
+    if (modelRef.current?.mixer && modelAnimationStartedRef.current) {
       if (story && story.sequenceTime >= INTRO_DURATION) {
         const period = 2.6; // 2.6s natural rhythmic petal sway
         const progress = 0.5 * (1 - Math.cos((story.sequenceTime - INTRO_DURATION) * (2 * Math.PI / period)));
@@ -347,6 +413,19 @@ export function useAREngine(): UseAREngineReturn {
       } else {
         modelRef.current.mixer.update(safeDt);
       }
+      worldTrackingDebugger.recordTransformWrite(
+        'MODEL',
+        'MODEL_ANIMATION_TRANSFORM',
+        'AnimationMixer.update',
+        modelRef.current.modelScene,
+        debugModelBefore,
+        'Existing GLB animation mixer advanced the loaded model.',
+        {
+          mixerTime: Number(modelRef.current.mixer.time.toFixed(4)),
+          actionCount: modelRef.current.actions?.length ?? 0,
+          deltaTimeSeconds: story && story.sequenceTime >= INTRO_DURATION ? 0 : safeDt,
+        }
+      );
     }
 
     if (!isSimulation && trackingRef.current?.isWorldAnchored && modelRef.current?.mixer) {
@@ -456,6 +535,7 @@ export function useAREngine(): UseAREngineReturn {
       trackingRef.current?.dispose();
       hydrationFXRef.current?.dispose();
       eightWallRef.current?.stopAR();
+      worldTrackingDebugger.stop();
       for (const line of Object.values(modelRef.current?.calloutLines ?? {})) {
         line.geometry.dispose();
         const material = line.material;

@@ -41,8 +41,8 @@ async function processTargetJson(json: ImageTargetData): Promise<ImageTargetData
           reader.readAsDataURL(blob);
         });
       }
-    } catch (e) {
-      console.warn('Failed to convert imagePath to data URL, keeping original:', e);
+    } catch {
+      // Keep the original image path if conversion is unavailable.
     }
   }
 

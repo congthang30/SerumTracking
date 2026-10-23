@@ -15,155 +15,24 @@ export interface CameraInfo {
   isBack: boolean;
 }
 
-const cameraDebugValues = new Map<string, string>();
-const CAMERA_DEBUG_ENABLED = typeof window !== 'undefined' &&
-  new URLSearchParams(window.location.search).get('cameraDebug') === '1';
-const CAMERA_DEBUG_TERMINAL_BRIDGE_ENABLED = (import.meta as any).env?.DEV === true;
-let cameraTraceStartedAt = typeof performance !== 'undefined' ? performance.now() : 0;
-let cameraTraceSessionId = new Date().toISOString().replace(/[:.]/g, '-');
-const cameraDebugTrace: string[] = [];
-const CAMERA_DEBUG_TRACE_LIMIT = 120;
-let cameraDebugTraceSequence = 0;
-let restoreXR8ConsoleBridge: (() => void) | null = null;
-let terminalTraceQueue: Promise<void> = Promise.resolve();
-
-export function isCameraDebugEnabled(): boolean {
-  return CAMERA_DEBUG_ENABLED;
-}
-
-/** True when AR trace events are being collected in either the debug panel or dev terminal. */
 export function isARTraceEnabled(): boolean {
-  return CAMERA_DEBUG_ENABLED || CAMERA_DEBUG_TERMINAL_BRIDGE_ENABLED;
+  return false;
 }
 
 export function beginARTraceSession(): void {
-  if (!isCameraDebugEnabled() && !CAMERA_DEBUG_TERMINAL_BRIDGE_ENABLED) return;
-  cameraTraceStartedAt = typeof performance !== 'undefined' ? performance.now() : 0;
-  cameraTraceSessionId = new Date().toISOString().replace(/[:.]/g, '-');
-  cameraDebugTrace.length = 0;
-  cameraDebugTraceSequence = 0;
-  traceAR('AR_TRACE_SESSION_START', { sessionId: cameraTraceSessionId });
+  // Disabled in the shipped experience.
 }
 
-export function reportCameraDiagnostic(label: string, value: string): void {
-  if (!isCameraDebugEnabled() || typeof document === 'undefined') return;
-
-  cameraDebugValues.set(label, value);
-  renderCameraDiagnostics(false);
+export function reportCameraDiagnostic(_label: string, _value: string): void {
+  // Disabled in the shipped experience.
 }
 
-/** Emits a timestamped AR lifecycle event to both the device console and debug panel. */
 export function traceAR(
-  event: string,
-  details: Record<string, unknown> = {},
-  level: 'info' | 'warn' | 'error' = 'info'
+  _event: string,
+  _details: Record<string, unknown> = {},
+  _level: 'info' | 'warn' | 'error' = 'info'
 ): void {
-  if (!isCameraDebugEnabled() && !CAMERA_DEBUG_TERMINAL_BRIDGE_ENABLED) return;
-
-  const now = typeof performance !== 'undefined' ? performance.now() : cameraTraceStartedAt;
-  const elapsed = Math.max(0, now - cameraTraceStartedAt) / 1000;
-  const sequence = ++cameraDebugTraceSequence;
-  const detailText = Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
-  const line = `#${String(sequence).padStart(4, '0')} +${elapsed.toFixed(3)}s ${event}${detailText}`;
-  cameraDebugTrace.push(line);
-  if (cameraDebugTrace.length > CAMERA_DEBUG_TRACE_LIMIT) cameraDebugTrace.shift();
-
-  const log = console[level] ?? console.log;
-  log.call(console, `[AR_TRACE ${cameraTraceSessionId}] ${line}`);
-  if (CAMERA_DEBUG_TERMINAL_BRIDGE_ENABLED) {
-    const sessionId = cameraTraceSessionId;
-    terminalTraceQueue = terminalTraceQueue.then(async () => {
-      try {
-        await fetch('/__ar-trace', {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-          body: JSON.stringify({ sessionId, line }),
-          keepalive: true,
-        });
-      } catch {
-        // The debug console and on-screen panel still work if the terminal bridge is unavailable.
-      }
-    });
-  }
-  if (isCameraDebugEnabled()) renderCameraDiagnostics(true);
-}
-
-/** Mirrors only 8th Wall's verbose session startup lines to the Vite terminal in dev. */
-export function installXR8ConsoleBridge(): () => void {
-  if (!CAMERA_DEBUG_TERMINAL_BRIDGE_ENABLED) return () => {};
-  if (restoreXR8ConsoleBridge) return restoreXR8ConsoleBridge;
-
-  const levels = ['log', 'info', 'warn', 'error'] as const;
-  const originals = new Map<typeof levels[number], typeof console.log>();
-  for (const level of levels) {
-    const original = console[level] as typeof console.log;
-    originals.set(level, original);
-    console[level] = ((...args: unknown[]) => {
-      original.apply(console, args);
-      const message = args.map((value) => {
-        if (typeof value === 'string') return value;
-        if (value instanceof Error) return `${value.name}: ${value.message}`;
-        try {
-          return JSON.stringify(value);
-        } catch {
-          return String(value);
-        }
-      }).join(' ');
-      if (/^\[(?:XR|xr)\]\s/.test(message) || message.startsWith('8th Wall XR Version:')) {
-        traceAR('XR8_INTERNAL_LOG', { level, message }, level === 'log' ? 'info' : level);
-      }
-    }) as typeof console.log;
-  }
-
-  restoreXR8ConsoleBridge = () => {
-    for (const level of levels) {
-      const original = originals.get(level);
-      if (original) console[level] = original;
-    }
-    restoreXR8ConsoleBridge = null;
-  };
-  return restoreXR8ConsoleBridge;
-}
-
-function renderCameraDiagnostics(followTrace: boolean): void {
-  if (!isCameraDebugEnabled() || typeof document === 'undefined') return;
-
-  let panel = document.getElementById('serum-camera-diagnostics') as HTMLPreElement | null;
-  if (!panel) {
-    panel = document.createElement('pre');
-    panel.id = 'serum-camera-diagnostics';
-    panel.setAttribute('aria-label', 'Camera diagnostics');
-    Object.assign(panel.style, {
-      position: 'fixed',
-      left: '8px',
-      right: '8px',
-      bottom: 'max(8px, env(safe-area-inset-bottom))',
-      zIndex: '2147483647',
-      maxHeight: '40vh',
-      overflow: 'auto',
-      margin: '0',
-      padding: '8px 10px',
-      borderRadius: '8px',
-      background: 'rgba(0, 0, 0, 0.82)',
-      color: '#d9ffe7',
-      font: '11px/1.4 monospace',
-      whiteSpace: 'pre-wrap',
-      overflowWrap: 'anywhere',
-      pointerEvents: 'auto',
-    });
-    document.body.appendChild(panel);
-  }
-
-  const entries = Array.from(cameraDebugValues, ([name, detail]) => `${name}: ${detail}`);
-  const wasNearBottom = panel.scrollHeight - panel.clientHeight - panel.scrollTop < 40;
-  panel.textContent = [
-    `SERUM AR DEBUG | session ${cameraTraceSessionId}`,
-    ...entries,
-    '',
-    'EVENT TRACE (oldest to newest; max 120)',
-    ...cameraDebugTrace,
-  ].join('\n');
-  if (followTrace && wasNearBottom) panel.scrollTop = panel.scrollHeight;
+  // Disabled in the shipped experience.
 }
 
 function parseCameraInfo(d: MediaDeviceInfo): CameraInfo {
