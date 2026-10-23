@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Serum Cinematic Storyboard Animation Viewer</title>
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: radial-gradient(circle at 50% 30%, #0f172a 0%, #020617 100%);
+      color: #f1f5f9;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+    .main-stage {
+      flex: 1;
+      height: 100vh;
+      position: relative;
+    }
+    model-viewer {
+      width: 100%;
+      height: 100%;
+      outline: none;
+      --poster-color: transparent;
+    }
+    .hud-title {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 18px;
+      padding: 18px 24px;
+      z-index: 10;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      max-width: 440px;
+    }
+    .badge-luxury {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-bottom: 8px;
+    }
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #38bdf8;
+      box-shadow: 0 0 10px #38bdf8;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.6; }
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.3px;
+      margin-bottom: 4px;
+    }
+    p {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+    .phase-indicator {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #7dd3fc;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .specs-card {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 18px;
+      padding: 18px 22px;
+      z-index: 10;
+      font-size: 12px;
+      line-height: 1.8;
+      color: #cbd5e1;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    }
+    .specs-card strong { color: #38bdf8; font-weight: 600; }
+    .controls-bar {
+      position: absolute;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(24px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 40px;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 10;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 90vw;
+    }
+    .btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #f1f5f9;
+      padding: 7px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.16);
+      transform: translateY(-2px);
+    }
+    .btn.active {
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      border-color: #38bdf8;
+      box-shadow: 0 4px 16px rgba(2, 132, 199, 0.5);
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="main-stage">
+    <div class="hud-title">
+      <div class="badge-luxury">
+        <span class="pulse-dot"></span>
+        <span>Storyboard Sequence (150 Frames • 5.0s)</span>
+      </div>
+      <h1>Serum Cinematic Storyboard</h1>
+      <p>Chai serum và sóng nước xuất hiện trước &rarr; Sóng nước xoáy &rarr; Nước tan biến &rarr; Cục đá dâng lên &amp; Hoa nở rộ &rarr; Chai tiếp đất.</p>
+      <div class="phase-indicator" id="phase-text">
+        ⏳ Timeline: 302 Frames (30 FPS • 10.07s)
+      </div>
+    </div>
+
+    <div class="specs-card">
+      <div>Model: <strong>serum_story_animated.glb</strong></div>
+      <div>Clip: <strong>Serum_Cinematic_Sequence</strong></div>
+      <div>Duration: <strong>302 Frames / 10.07s @ 30fps</strong></div>
+      <div>Scene 1 (1–35): <strong>Chai Serum &amp; Sóng Nước dâng lên trước</strong></div>
+      <div>Scene 2 (35–204): <strong>Sóng Nước xoáy êm dịu quanh chai (5.6s chậm mượt thanh lịch)</strong></div>
+      <div>Scene 3 (204–226): <strong>Splash Burst &amp; Nước tan biến</strong></div>
+      <div>Scene 4 (209–238): <strong>Cục Đá dâng lên bên dưới chai</strong></div>
+      <div>Scene 5 (226–270): <strong>Hoa bắt đầu nở rộ rực rỡ quanh đá</strong></div>
+      <div>Scene 6 (240–302): <strong>Chai tiếp đất, Hoa nở trọn vẹn</strong></div>
+    </div>
+
+    <model-viewer
+      id="mv"
+      src="assets/models/serum_story_animated.glb?v=5"
+      autoplay
+      animation-name="Serum_Cinematic_Sequence"
+      camera-controls
+      auto-rotate
+      auto-rotate-delay="1000"
+      rotation-per-second="12deg"
+      camera-orbit="15deg 78deg 2.7m"
+      field-of-view="35deg"
+      exposure="1.25"
+      shadow-intensity="1.2"
+      shadow-softness="0.8"
+    ></model-viewer>
+
+    <div class="controls-bar">
+      <button class="btn active" id="btn-pause">⏯ Phát / Tạm Dừng</button>
+      <button class="btn" id="btn-s1">1️⃣ Cảnh 1 (F1)</button>
+      <button class="btn" id="btn-s2">2️⃣ Cảnh 2 (F40)</button>
+      <button class="btn" id="btn-s3">3️⃣ Cảnh 3 (F80)</button>
+      <button class="btn" id="btn-s4">4️⃣ Cảnh 4 (F125)</button>
+      <button class="btn" id="btn-s5">5️⃣ Cảnh 5 (F145)</button>
+      <button class="btn" id="btn-s6">6️⃣ Cảnh 6 (F190)</button>
+      <button class="btn active" id="btn-speed-normal">1.0x (Nhanh chuẩn)</button>
+      <button class="btn" id="btn-speed-half">0.5x (Chậm)</button>
+    </div>
+  </div>
+
+  <script>
+    const mv = document.getElementById('mv');
+    const phaseText = document.getElementById('phase-text');
+    const btnPause = document.getElementById('btn-pause');
+    const btnSpeedHalf = document.getElementById('btn-speed-half');
+    const btnSpeedNormal = document.getElementById('btn-speed-normal');
+
+    let isPlaying = true;
+
+    mv.addEventListener('load', () => {
+      mv.timeScale = 1.0;
+    });
+
+    btnPause.addEventListener('click', () => {
+      if (isPlaying) {
+        mv.pause();
+        isPlaying = false;
+        btnPause.classList.remove('active');
+      } else {
+        mv.play();
+        isPlaying = true;
+        btnPause.classList.add('active');
+      }
+    });
+
+    const jumpToFrame = (frame) => {
+      if (!mv.duration) return;
+      mv.currentTime = (frame / 212) * mv.duration;
+    };
+
+    document.getElementById('btn-s1').addEventListener('click', () => jumpToFrame(1));
+    document.getElementById('btn-s2').addEventListener('click', () => jumpToFrame(40));
+    document.getElementById('btn-s3').addEventListener('click', () => jumpToFrame(80));
+    document.getElementById('btn-s4').addEventListener('click', () => jumpToFrame(125));
+    document.getElementById('btn-s5').addEventListener('click', () => jumpToFrame(142));
+    document.getElementById('btn-s6').addEventListener('click', () => jumpToFrame(185));
+
+    btnSpeedHalf.addEventListener('click', () => {
+      mv.timeScale = 0.5;
+      btnSpeedHalf.classList.add('active');
+      btnSpeedNormal.classList.remove('active');
+    });
+    btnSpeedNormal.addEventListener('click', () => {
+      mv.timeScale = 1.0;
+      btnSpeedNormal.classList.add('active');
+      btnSpeedHalf.classList.remove('active');
+    });
+
+    setInterval(() => {
+      if (!mv.duration) return;
+      const progress = mv.currentTime / mv.duration;
+      const frame = Math.round(progress * 212);
+
+      if (frame <= 25) {
+        phaseText.innerHTML = `🌟 Scene 1 (F${frame}/212): Hero Intro — Chỉ chai serum và tảng đá`;
+      } else if (frame <= 50) {
+        phaseText.innerHTML = `🌊 Scene 2 (F${frame}/212): Water Emergence — Nước thanh mảnh xuất hiện từ chân đá`;
+      } else if (frame <= 114) {
+        phaseText.innerHTML = `🌀 Scene 3 (F${frame}/212): 2-Turn Spiral — Dòng nước xoáy 2 vòng quanh chai (~2.1s)`;
+      } else if (frame <= 136) {
+        phaseText.innerHTML = `✨ Scene 4 (F${frame}/212): Droplets Shatter — Nước vỡ tung thành hạt li ti`;
+      } else if (frame <= 147) {
+        phaseText.innerHTML = `💨 Scene 5 (F${frame}/212): Water Dissolve — Hạt nước tan biến 100%`;
+      } else {
+        phaseText.innerHTML = `🌸 Scene 6 (F${frame}/212): Flower Bloom — Hoa nở rộ xung quanh tảng đá`;
+      }
+    }, 100);
+  </script>
+</body>
+</html>

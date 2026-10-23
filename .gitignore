@@ -1,0 +1,4 @@
+node_modules/
+dist/
+scratch_crop*.png
+*.blend1

@@ -1,0 +1,25 @@
+{
+  "imagePath": "assets/image-target/serum_luminance.jpg",
+  "metadata": {
+    "physicalWidthMeters": 0.2,
+    "sourceImage": "assets/image-target/img_target.png"
+  },
+  "name": "serum-target",
+  "type": "PLANAR",
+  "properties": {
+    "left": 35,
+    "top": 0,
+    "width": 1052,
+    "height": 1402,
+    "isRotated": false,
+    "originalWidth": 1122,
+    "originalHeight": 1402
+  },
+  "resources": {
+    "originalImage": "serum_original.png",
+    "croppedImage": "serum_cropped.png",
+    "thumbnailImage": "serum_thumbnail.png",
+    "luminanceImage": "serum_luminance.jpg"
+  },
+  "loadAutomatically": true
+}

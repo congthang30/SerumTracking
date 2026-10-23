@@ -1,0 +1,19 @@
+{
+  "imagePath": "targets/serum_luminance.jpg",
+  "metadata": {
+    "physicalWidthMeters": 0.2,
+    "sourceImage": "targets/serum-print.png"
+  },
+  "name": "serum",
+  "type": "PLANAR",
+  "properties": {
+    "left": 0,
+    "top": 0,
+    "width": 480,
+    "height": 640,
+    "isRotated": false,
+    "originalWidth": 480,
+    "originalHeight": 640
+  },
+  "loadAutomatically": true
+}

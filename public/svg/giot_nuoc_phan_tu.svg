@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="461" height="417" viewBox="0 0 461 417" role="img" aria-label="Biểu tượng giọt nước màu xanh với các nút phân tử">
+  <title>Giọt nước và phân tử</title>
+  <defs>
+    <clipPath id="mainDropClip">
+      <path d="M224.7 46.9 C210.3 68.0 175.0 138.5 150.3 191.8 C127.8 240.8 117.0 270.6 117.4 302.8 C117.9 353.8 151.3 390.0 217.4 391.5 C279.0 393.0 320.8 367.8 330.7 312.2 C340.4 260.7 299.5 172.1 266.1 112.6 C246.9 77.2 232.0 52.8 224.7 46.9 Z"/>
+    </clipPath>
+    <clipPath id="midLeftDropClip">
+      <path d="M94.0 121.6 C85.9 134.6 71.6 154.1 71.5 164.6 C71.5 176.9 81.0 185.7 94.4 185.7 C107.7 185.7 116.8 176.6 116.3 164.5 C115.9 154.5 102.7 135.0 94.0 121.6 Z"/>
+    </clipPath>
+    <clipPath id="rightDropClip">
+      <path d="M343.4 142.0 C335.5 152.9 319.2 173.0 319.3 185.4 C319.5 197.9 330.1 207.1 343.7 207.1 C356.7 207.1 366.3 197.4 366.3 185.2 C366.3 173.7 352.3 154.8 343.4 142.0 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Large drop; all paths are editable vectors. -->
+  <path d="M224.7 46.9 C210.3 68.0 175.0 138.5 150.3 191.8 C127.8 240.8 117.0 270.6 117.4 302.8 C117.9 353.8 151.3 390.0 217.4 391.5 C279.0 393.0 320.8 367.8 330.7 312.2 C340.4 260.7 299.5 172.1 266.1 112.6 C246.9 77.2 232.0 52.8 224.7 46.9 Z" fill="#5DDCF0"/>
+  <g clip-path="url(#mainDropClip)">
+    <path d="M227 48 C224 87 228 120 248 167 C273 221 289 270 275 320 C267 352 250 374 222 398 L343 402 L346 266 C310 182 250 74 227 48 Z" fill="#4BC4D0"/>
+    <path d="M126 294 C134 321 152 341 184 344 C227 350 264 320 277 276 C280 308 265 347 242 372 C202 392 156 380 129 346 C118 326 114 306 126 294 Z" fill="#67E2F1" opacity=".8"/>
+    <path d="M233 58 C198 122 165 183 145 244 C137 267 131 291 133 311" fill="none" stroke="#D1FAFF" stroke-width="8" stroke-linecap="round" opacity=".6"/>
+  </g>
+  <path d="M224.7 46.9 C210.3 68.0 175.0 138.5 150.3 191.8 C127.8 240.8 117.0 270.6 117.4 302.8 C117.9 353.8 151.3 390.0 217.4 391.5 C279.0 393.0 320.8 367.8 330.7 312.2 C340.4 260.7 299.5 172.1 266.1 112.6 C246.9 77.2 232.0 52.8 224.7 46.9 Z" fill="none" stroke="#26312D" stroke-width="5.8" stroke-linejoin="round"/>
+
+  <!-- Small surrounding droplets -->
+  <path d="M147.8 67.1 C142.7 73.7 133.0 86.2 132.8 95.0 C132.6 103.1 139.0 109.0 147.8 109.0 C156.6 109.0 162.8 102.8 162.3 94.7 C161.9 86.8 153.1 74.3 147.8 67.1 Z" fill="#65DBEF" stroke="#26312D" stroke-width="5.5" stroke-linejoin="round"/>
+  <path d="M147.8 72.8 C145.1 79.5 139.0 87.0 139.0 96.3 C139.0 100.3 141.3 103.4 145.3 104.3" fill="none" stroke="#BCF8FF" stroke-width="5" stroke-linecap="round"/>
+
+  <path d="M325.5 67.8 C320.3 74.7 309.6 87.9 309.9 95.7 C310.2 103.0 316.2 108.3 325.2 108.3 C333.9 108.3 340.6 102.4 340.1 94.5 C339.6 87.0 331.0 74.5 325.5 67.8 Z" fill="#65DAEB" stroke="#26312D" stroke-width="5.5" stroke-linejoin="round"/>
+  <path d="M323.6 75.8 C318.7 82.3 314.9 89.4 315.7 96.2" fill="none" stroke="#BDFAFF" stroke-width="4.5" stroke-linecap="round"/>
+
+  <path d="M94.0 121.6 C85.9 134.6 71.6 154.1 71.5 164.6 C71.5 176.9 81.0 185.7 94.4 185.7 C107.7 185.7 116.8 176.6 116.3 164.5 C115.9 154.5 102.7 135.0 94.0 121.6 Z" fill="#64E2F4"/>
+  <g clip-path="url(#midLeftDropClip)">
+    <path d="M94 126 C96 149 106 161 106 171 C106 182 97 190 89 192 L120 191 L120 151 L94 126 Z" fill="#4BC4D2"/>
+    <path d="M90 130 C80 147 76 157 76 166 C77 175 83 180 90 181" fill="none" stroke="#D2FCFF" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <path d="M94.0 121.6 C85.9 134.6 71.6 154.1 71.5 164.6 C71.5 176.9 81.0 185.7 94.4 185.7 C107.7 185.7 116.8 176.6 116.3 164.5 C115.9 154.5 102.7 135.0 94.0 121.6 Z" fill="none" stroke="#26312D" stroke-width="5.6" stroke-linejoin="round"/>
+
+  <path d="M343.4 142.0 C335.5 152.9 319.2 173.0 319.3 185.4 C319.5 197.9 330.1 207.1 343.7 207.1 C356.7 207.1 366.3 197.4 366.3 185.2 C366.3 173.7 352.3 154.8 343.4 142.0 Z" fill="#66DDEE"/>
+  <g clip-path="url(#rightDropClip)">
+    <path d="M345 149 C345 169 353 182 353 192 C353 199 347 207 341 212 L374 213 L373 172 Z" fill="#4BC4D1"/>
+    <path d="M339 157 C330 170 326 177 326 185 C326 193 332 199 337 201" stroke="#D3FAFE" stroke-width="6" fill="none" stroke-linecap="round"/>
+  </g>
+  <path d="M343.4 142.0 C335.5 152.9 319.2 173.0 319.3 185.4 C319.5 197.9 330.1 207.1 343.7 207.1 C356.7 207.1 366.3 197.4 366.3 185.2 C366.3 173.7 352.3 154.8 343.4 142.0 Z" fill="none" stroke="#26312D" stroke-width="5.6" stroke-linejoin="round"/>
+
+  <!-- Molecular bonds drawn behind their nodes -->
+  <g fill="none" stroke="#26312D" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M217 197 L249 145"/>
+    <path d="M96 263 L160 246"/>
+    <path d="M220 272 L260 326"/>
+  </g>
+
+  <!-- Molecule nodes -->
+  <circle cx="265.4" cy="130.6" r="32.4" fill="#FFF" stroke="#26312D" stroke-width="5.6"/>
+  <path d="M281.8 131.9 C281.0 141.4 274.5 148.6 264.6 149.6" fill="none" stroke="#26312D" stroke-width="5.6" stroke-linecap="round"/>
+
+  <circle cx="200.9" cy="237.3" r="52.1" fill="#FFF" stroke="#26312D" stroke-width="5.8"/>
+  <path d="M236.2 238.8 C236.2 259.2 221.4 274.2 200.9 274.2" fill="none" stroke="#26312D" stroke-width="5.7" stroke-linecap="round"/>
+
+  <circle cx="81.6" cy="267.6" r="21.8" fill="#FFF" stroke="#26312D" stroke-width="5.6"/>
+  <path d="M95.5 268.0 C95.5 275.4 89.6 282.0 81.9 282.2" fill="none" stroke="#26312D" stroke-width="5.2" stroke-linecap="round"/>
+
+  <circle cx="265.5" cy="336.5" r="21.2" fill="#FFF" stroke="#26312D" stroke-width="5.6"/>
+  <path d="M279.5 336.7 C279.4 344.2 274.4 348.8 267.0 350.5" fill="none" stroke="#26312D" stroke-width="5.2" stroke-linecap="round"/>
+</svg>

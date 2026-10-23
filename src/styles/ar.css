@@ -1,0 +1,260 @@
+:root {
+  --color-rose-gold: #c99688;
+  --color-rose-gold-dark: #a87669;
+  --color-rose-gold-light: #e0b4a8;
+  --color-soft-pink: #f1dad7;
+  --color-soft-pink-light: #faf0ee;
+  --color-warm-white: #fff8f3;
+  --color-dark-brown: #604740;
+  --color-dark-brown-deep: #42302a;
+  --color-gold: #d4af37;
+  --color-gold-glow: rgba(212, 175, 55, 0.4);
+}
+
+/* Base Fullscreen Canvas */
+.ar-container {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #0e131d;
+  touch-action: none;
+}
+
+#ar-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+
+/* Callouts SVG Layer */
+.callouts-svg-layer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 15;
+}
+
+.callout-line-path {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: miter;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.95)) drop-shadow(0 2px 5px rgba(0, 0, 0, 0.75));
+  transition: opacity 0.25s ease;
+}
+
+/* Glowing essence particle traveling along the line */
+.callout-particle {
+  fill: #ffffff;
+  filter: drop-shadow(0 0 4px #ffffff) drop-shadow(0 0 8px rgba(180, 220, 255, 0.95));
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+/* Crisp anchor pin dot at contact point on bottle */
+.callout-pin-dot {
+  fill: #ffffff;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.2;
+  filter: drop-shadow(0 0 3px #ffffff) drop-shadow(0 0 6px rgba(255, 255, 255, 0.8));
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+/* Anchor Dot - removed per user request */
+.anchor-dot {
+  display: none !important;
+}
+
+/* Minimalist Luxury Cosmetic HUD Callout Labels (Reference Style) */
+.ingredient-card {
+  position: fixed;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 4px 2px 4px !important;
+  z-index: 20;
+  pointer-events: auto;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: visible !important;
+  will-change: opacity, transform;
+  transition: opacity 0.25s ease, transform 0.15s ease;
+}
+
+.ingredient-card.card-right {
+  flex-direction: row-reverse;
+}
+
+.card-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 8px rgba(255, 255, 255, 0.4));
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.ingredient-card:hover .card-icon {
+  transform: scale(1.18) rotate(-4deg);
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 14px rgba(255, 255, 255, 0.8));
+}
+
+.ingredient-card.card-hidden {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.ingredient-card:hover {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.ingredient-card.pill-clicked {
+  transform: scale(0.96) !important;
+}
+
+.card-title {
+  font-family: 'Outfit', 'Plus Jakarta Sans', -apple-system, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 2.2px;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95),
+               0 1px 3px rgba(0, 0, 0, 0.95),
+               0 0 12px rgba(255, 255, 255, 0.4);
+  transition: all 0.2s ease;
+}
+
+.ingredient-card:hover .card-title {
+  color: #ffffff;
+  text-shadow: 0 0 12px rgba(255, 255, 255, 1),
+               0 0 24px rgba(180, 220, 255, 0.9),
+               0 2px 8px rgba(0, 0, 0, 0.95);
+  transform: translateY(-1px);
+}
+
+
+/* Modal Dialog */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 19, 29, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 80;
+  padding: 20px;
+  animation: fadeIn 0.25s ease;
+}
+
+.modal-content {
+  background: var(--color-warm-white);
+  border: 1px solid rgba(201, 150, 136, 0.4);
+  border-radius: 20px;
+  padding: 24px;
+  max-width: 360px;
+  width: 100%;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+  position: relative;
+  animation: popUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes popUp {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modal-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-rose-gold-dark);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.modal-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-dark-brown);
+  margin-bottom: 8px;
+}
+
+.modal-subtitle-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-rose-gold-dark);
+  margin-bottom: 14px;
+}
+
+.modal-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #634d47;
+  margin-bottom: 16px;
+}
+
+.modal-highlight {
+  background: var(--color-soft-pink-light);
+  border-left: 3px solid var(--color-rose-gold);
+  border-radius: 0 10px 10px 0;
+  padding: 10px 12px;
+  font-size: 11.5px;
+  color: var(--color-dark-brown-deep);
+  font-style: italic;
+  margin-bottom: 20px;
+}
+
+.modal-close-btn {
+  width: 100%;
+  background: linear-gradient(135deg, var(--color-rose-gold), var(--color-rose-gold-dark));
+  color: var(--color-warm-white);
+  border: none;
+  border-radius: 20px;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
