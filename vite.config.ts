@@ -25,6 +25,7 @@ function worldTrackingDevelopmentBridge(): Plugin {
     name: 'world-tracking-development-bridge',
     apply: 'serve',
     configureServer(server) {
+      server.config.logger.info(`[WORLD_AR] Terminal bridge active at POST ${WORLD_TRACKING_BRIDGE_PATH}`);
       server.middlewares.use((request: any, response: any, next: () => void) => {
         const path = String(request.url ?? '').split('?', 1)[0];
         if (path !== WORLD_TRACKING_BRIDGE_PATH) return next();
@@ -35,9 +36,13 @@ function worldTrackingDevelopmentBridge(): Plugin {
           return;
         }
 
-        const host = String(request.headers.host ?? '');
+        const forwardedHost = String(request.headers['x-forwarded-host'] ?? '').split(',')[0].trim();
+        const host = forwardedHost || String(request.headers.host ?? '');
         const origin = String(request.headers.origin ?? '');
-        const protocol = request.socket?.encrypted ? 'https:' : 'http:';
+        const forwardedProtocol = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0].trim().toLowerCase();
+        const protocol = forwardedProtocol === 'https' || forwardedProtocol === 'http'
+          ? `${forwardedProtocol}:`
+          : request.socket?.encrypted ? 'https:' : 'http:';
         let sameOrigin = false;
         try {
           const parsedOrigin = new URL(origin);
@@ -47,6 +52,7 @@ function worldTrackingDevelopmentBridge(): Plugin {
         }
         const remoteAddress = String(request.socket?.remoteAddress ?? '');
         if (!sameOrigin || !isDevelopmentNetworkAddress(remoteAddress)) {
+          server.config.logger.warn(`[WORLD_AR][BRIDGE][REJECTED] reason=${!sameOrigin ? 'origin_or_protocol_mismatch' : 'non_private_client'}`);
           response.statusCode = 403;
           response.end('Development bridge access denied');
           return;
