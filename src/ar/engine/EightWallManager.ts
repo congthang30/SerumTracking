@@ -3,6 +3,7 @@ import { ImagePose } from '../../types/ar';
 import { loadImageTargetData, ImageTargetData } from '../config/targets';
 import { reportCameraDiagnostic, traceAR } from '../xr/camera-fix';
 import { logger } from '../../utils/logger';
+import { worldTrackingDebugger } from '../debug/WorldTrackingDebugger';
 import type { XR8FrameContext } from '../debug/WorldTrackingDebugger';
 
 // Expose THREE globally for 8th Wall's Threejs pipeline module
@@ -17,7 +18,12 @@ export interface EightWallCallbacks {
   onPipelineEventPhase?: (phase: 'START' | 'END') => void;
   onPipelineState?: (state: 'PAUSED' | 'RESUMED' | 'DETACHED') => void;
   onCameraStatus?: (payload: Record<string, unknown>, video?: HTMLVideoElement | null) => void;
-  onCameraStarted: (info: { scene: THREE.Scene; camera: THREE.Camera; renderer?: THREE.WebGLRenderer }) => void;
+  onCameraStarted: (info: {
+    scene: THREE.Scene;
+    camera: THREE.Camera;
+    renderer?: THREE.WebGLRenderer;
+    runtimeVersion: string;
+  }) => void;
   onError: (message: string) => void;
   onProgress?: (stage: string) => void;
 }
@@ -470,7 +476,12 @@ export class EightWallManager {
             `[8TH_WALL] Engine version=${this.runtimeVersion}; disableWorldTracking=false; SLAM configured before XR8.run()`
           );
 
-          cb.onCameraStarted({ scene: xr.scene, camera: xr.camera, renderer: xr.renderer });
+          cb.onCameraStarted({
+            scene: xr.scene,
+            camera: xr.camera,
+            renderer: xr.renderer,
+            runtimeVersion: this.runtimeVersion,
+          });
           this.running = true;
           this.isStarting = false;
           traceAR('XR8_SESSION_READY', {
@@ -582,6 +593,14 @@ export class EightWallManager {
       this.imageEventsAfterClearConfigured += 1;
       if (!this.loggedImageEventAfterClear) {
         this.loggedImageEventAfterClear = true;
+        worldTrackingDebugger.recordEvent('TRACKING', 'IMAGE_TARGET_EVENT_IGNORED_AFTER_CLEAR', {
+          event,
+          target,
+          imageTargetClearRequested: this.imageTargetClearRequested,
+          imageTargetClearConfigured: this.imageTargetClearConfigured,
+          eventCountAfterConfiguration: this.imageEventsAfterClearConfigured,
+          action: 'ignored before application callback; existing world anchor retains the model pose',
+        }, { bridge: true });
         traceAR('IMAGE_TARGET_EVENT_AFTER_CLEAR_CONFIGURED', {
           event,
           target,

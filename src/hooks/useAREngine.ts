@@ -4,13 +4,13 @@ import { Ingredient } from '../types/ar';
 import { SerumScene } from '../ar/scene/SerumScene';
 import { SerumModelLoader, LoadedSerumModel } from '../ar/models/SerumModelLoader';
 import { ProductStoryTimeline, StoryPhase } from '../ar/animation/ProductStoryTimeline';
-import { HydrationFX } from '../ar/effects/HydrationFX';
 import { CalloutProjection } from '../ar/callouts/CalloutProjection';
 import { Callout3DBadges } from '../ar/callouts/Callout3DBadges';
 import { ImageTrackingController } from '../ar/tracking/ImageTrackingController';
 import { EightWallManager } from '../ar/engine/EightWallManager';
 import { beginARTraceSession, traceAR } from '../ar/xr/camera-fix';
-import { worldTrackingDebugger } from '../ar/debug/WorldTrackingDebugger';
+import { DEBUG_AR_PERF, worldTrackingDebugger } from '../ar/debug/WorldTrackingDebugger';
+import { arPerformanceMonitor } from '../ar/debug/ARPerformanceMonitor';
 
 export interface UseAREngineReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -49,6 +49,8 @@ export function useAREngine(): UseAREngineReturn {
   const [selectedIngredientId, setSelectedIngredientId] = useState<string | null>(null);
   const [is360Active, setIs360Active] = useState(false);
   const [storyPhase, setStoryPhase] = useState<StoryPhase>('PHASE_1_REVEAL');
+  const is360ActiveRef = useRef(false);
+  const storyPhaseRef = useRef<StoryPhase>('PHASE_1_REVEAL');
 
   const [isSimulation, setIsSimulation] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -74,7 +76,6 @@ export function useAREngine(): UseAREngineReturn {
   const sceneRef = useRef<SerumScene | null>(null);
   const modelRef = useRef<LoadedSerumModel | null>(null);
   const timelineRef = useRef<ProductStoryTimeline | null>(null);
-  const hydrationFXRef = useRef<HydrationFX | null>(null);
   const trackingRef = useRef<ImageTrackingController | null>(null);
   const calloutProjRef = useRef<CalloutProjection | null>(null);
   const calloutBadgesRef = useRef<Callout3DBadges | null>(null);
@@ -164,6 +165,7 @@ export function useAREngine(): UseAREngineReturn {
     const canvas = canvasRef.current;
     if (!isSimulation) {
       worldTrackingDebugger.start();
+      arPerformanceMonitor.start();
       beginARTraceSession();
       traceAR('SERUM_AR_BOOT_START', { simulation: false });
     }
@@ -198,14 +200,10 @@ export function useAREngine(): UseAREngineReturn {
       }
       serumScene.userRotationGroup.add(loadedModel.modelScene);
 
-      // 3. Initialize Timeline Controller (HydrationFX is superseded by baked master GLB)
-      const hydrationFX = new HydrationFX();
-      hydrationFXRef.current = hydrationFX;
-
+      // 3. Initialize the baked GLB timeline; the old procedural hydration FX is unused.
       timelineRef.current = new ProductStoryTimeline(
         serumScene.userRotationGroup,
-        loadedModel.bottleGroup,
-        hydrationFX
+        loadedModel.bottleGroup
       );
 
       trackingRef.current = new ImageTrackingController(
@@ -246,10 +244,6 @@ export function useAREngine(): UseAREngineReturn {
   ) => {
     sceneObj.initSimRenderer(canvas);
     sceneObj.attachToSimScene();
-    const simEnv = sceneObj.getStudioEnvMap();
-    if (simEnv && hydrationFXRef.current) {
-      hydrationFXRef.current.setEnvironmentMap(simEnv);
-    }
     // Add 3D Tabletop Poster Mesh (flat on table under pedestal, optional toggle)
     const texLoader = new THREE.TextureLoader();
     texLoader.load('assets/image-target/img_target.png', (tex) => {
@@ -292,7 +286,7 @@ export function useAREngine(): UseAREngineReturn {
     eightWallRef.current = manager;
 
     await manager.startAR(canvas, {
-      onCameraStarted: ({ scene, camera, renderer }) => {
+      onCameraStarted: ({ scene, camera, renderer, runtimeVersion }) => {
         sceneObj.attachToXRScene(scene, camera, renderer);
         trackingRef.current?.setCamera(camera);
         worldTrackingDebugger.setSceneObjects({
@@ -306,10 +300,7 @@ export function useAREngine(): UseAREngineReturn {
           bottleGroup: modelRef.current?.bottleGroup ?? null,
           modelRoot: modelRef.current?.modelScene ?? null,
         });
-        const env = sceneObj.getStudioEnvMap();
-        if (env && hydrationFXRef.current) {
-          hydrationFXRef.current.setEnvironmentMap(env);
-        }
+        if (renderer) arPerformanceMonitor.attachRenderer(renderer, runtimeVersion);
         calloutProjRef.current?.updateCamera(camera);
         calloutBadgesRef.current?.updateCamera(camera);
       },
@@ -334,12 +325,18 @@ export function useAREngine(): UseAREngineReturn {
         if (phase === 'START') worldTrackingDebugger.beginPipelineEvent();
         else worldTrackingDebugger.endPipelineEvent();
       },
-      onCameraStatus: (payload, video) => worldTrackingDebugger.recordCameraStatus(payload, video),
+      onCameraStatus: (payload, video) => {
+        worldTrackingDebugger.recordCameraStatus(payload, video);
+        if (DEBUG_AR_PERF) arPerformanceMonitor.recordCameraStatus(payload, video);
+      },
       onFrameUpdate: (context) => {
+        if (DEBUG_AR_PERF) arPerformanceMonitor.beginTrackingUpdate();
         if (worldTrackingDebugger.isEnabled) worldTrackingDebugger.beginFrame(context);
+        const sceneUpdateStartedAt = DEBUG_AR_PERF ? performance.now() : 0;
         try {
           renderFrame(false);
         } finally {
+          if (DEBUG_AR_PERF) arPerformanceMonitor.endTrackingUpdate(performance.now() - sceneUpdateStartedAt);
           if (worldTrackingDebugger.isEnabled) worldTrackingDebugger.endFrame();
         }
       },
@@ -391,10 +388,14 @@ export function useAREngine(): UseAREngineReturn {
       );
     }
     if (story) {
-      if (story.is360Active !== is360Active) {
+      if (story.is360Active !== is360ActiveRef.current) {
+        is360ActiveRef.current = story.is360Active;
+        arPerformanceMonitor.recordUiStateDispatch();
         setIs360Active(story.is360Active);
       }
-      if (story.phase !== storyPhase) {
+      if (story.phase !== storyPhaseRef.current) {
+        storyPhaseRef.current = story.phase;
+        arPerformanceMonitor.recordUiStateDispatch();
         setStoryPhase(story.phase);
       }
     }
@@ -533,9 +534,9 @@ export function useAREngine(): UseAREngineReturn {
         cancelAnimationFrame(animFrameRef.current);
       }
       trackingRef.current?.dispose();
-      hydrationFXRef.current?.dispose();
       eightWallRef.current?.stopAR();
       worldTrackingDebugger.stop();
+      arPerformanceMonitor.stop();
       for (const line of Object.values(modelRef.current?.calloutLines ?? {})) {
         line.geometry.dispose();
         const material = line.material;

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { HydrationFX } from '../effects/HydrationFX';
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
@@ -41,7 +40,6 @@ export interface StoryProgress {
 export class ProductStoryTimeline {
   private targetGroup: THREE.Group; // userRotationGroup / ProductRoot
   private bottleGroup: THREE.Object3D;
-  private hydrationFX: HydrationFX;
 
   // Initial transforms of bottleGroup to guarantee ZERO drift
   private initialBottlePos = new THREE.Vector3();
@@ -60,12 +58,10 @@ export class ProductStoryTimeline {
 
   constructor(
     targetGroup: THREE.Group,
-    bottleGroup: THREE.Object3D,
-    hydrationFX: HydrationFX
+    bottleGroup: THREE.Object3D
   ) {
     this.targetGroup = targetGroup;
     this.bottleGroup = bottleGroup;
-    this.hydrationFX = hydrationFX;
 
     this.initialBottlePos.copy(bottleGroup.position);
     this.initialBottleRotY = bottleGroup.rotation.y;
@@ -98,8 +94,6 @@ export class ProductStoryTimeline {
     this.targetGroup.scale.setScalar(this.baseScale * 0.85);
     this.targetGroup.position.set(0, 0, 0);
 
-    // Reset Hydration FX
-    this.hydrationFX.reset();
   }
 
   public update(dt: number): StoryProgress {
@@ -134,7 +128,6 @@ export class ProductStoryTimeline {
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.y = this.initialBottleRotY;
       this.bottleGroup.rotation.z = 0;
-      this.hydrationFX.setIntensity(0);
     }
     // --- PHASE 2: 0.83s – 6.80s (Storyboard Scene 02 & 03: Water Emergence & 5.6s Spiral Swirl) ---
     else if (t < 6.80) {
@@ -146,7 +139,6 @@ export class ProductStoryTimeline {
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
       this.bottleGroup.rotation.y = this.initialBottleRotY;
-      this.hydrationFX.setIntensity(0);
     }
     // --- PHASE 3: 6.80s – 7.53s (Storyboard Scene 04: Dynamic Splash Burst) ---
     else if (t < 7.53) {
@@ -156,7 +148,6 @@ export class ProductStoryTimeline {
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
       this.bottleGroup.rotation.y = this.initialBottleRotY;
-      this.hydrationFX.setIntensity(0);
     }
     // --- PHASE 4: 7.53s – 9.10s (Storyboard Scene 05 & 06: Rock Pedestal Emergence & Flower Blooming) ---
     else if (t < 9.10) {
@@ -164,14 +155,12 @@ export class ProductStoryTimeline {
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
       this.bottleGroup.rotation.y = this.initialBottleRotY;
-      this.hydrationFX.setIntensity(0);
     }
     // --- PHASE 5 & 6: 9.10s ONWARD (Scene 06B: Full Bloom Hold, Ingredients & Interactive 360) ---
     else {
       // Bottle firmly seated on rock pedestal in full botanical bloom
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
-      this.hydrationFX.setIntensity(0);
 
       if (t < 11.50) {
         phase = 'PHASE_5_INGREDIENTS';

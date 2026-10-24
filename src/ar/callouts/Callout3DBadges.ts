@@ -3,6 +3,12 @@ import { INGREDIENTS } from '../../data/ingredients';
 import { Ingredient } from '../../types/ar';
 
 const BADGE_CONTENT_SCALE = 1.5;
+const badgeMipmapsQuery = typeof window === 'undefined'
+  ? null
+  : new URLSearchParams(window.location.search).get('badgeMipmaps');
+
+// A/B: default (?badgeMipmaps=1) enables mipmaps; ?badgeMipmaps=0 restores the legacy filter.
+export const BADGE_MIPMAPS_ENABLED = badgeMipmapsQuery !== '0';
 
 export interface CalloutBadgeItem {
   id: string;
@@ -78,8 +84,11 @@ export class Callout3DBadges {
 
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
-      texture.minFilter = THREE.LinearFilter;
-      texture.generateMipmaps = false;
+      texture.generateMipmaps = BADGE_MIPMAPS_ENABLED;
+      texture.minFilter = BADGE_MIPMAPS_ENABLED
+        ? THREE.LinearMipmapLinearFilter
+        : THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
 
       this.renderBadgeToCanvas(canvas, ing, texture);
 

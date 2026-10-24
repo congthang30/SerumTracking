@@ -210,7 +210,7 @@ export class HydrationFX {
     });
     this.primaryRibbonMesh = new THREE.Mesh(this.primaryRibbonGeo, this.primaryMat);
     this.primaryRibbonMesh.name = 'Hydration_PrimaryVortexVeil';
-    this.primaryRibbonMesh.visible = false; // Superseded by real 3D GLB water_splash_spiral_animated
+    this.primaryRibbonMesh.visible = false; // Superseded by the authored water animation in serum_story_animated.glb
     this.group.add(this.primaryRibbonMesh);
 
     // --- 2. BUILD SECONDARY COUNTER-SPLASH VEIL ---
@@ -238,7 +238,7 @@ export class HydrationFX {
     });
     this.accentRibbonMesh = new THREE.Mesh(this.accentRibbonGeo, this.accentMat);
     this.accentRibbonMesh.name = 'Hydration_SecondaryCounterVeil';
-    this.accentRibbonMesh.visible = false; // Superseded by real 3D GLB water_splash_spiral_animated
+    this.accentRibbonMesh.visible = false; // Superseded by the authored water animation in serum_story_animated.glb
     this.group.add(this.accentRibbonMesh);
 
     // --- 3. BUILD SPLASHING DEWDROP GEMS (12 droplets) ---

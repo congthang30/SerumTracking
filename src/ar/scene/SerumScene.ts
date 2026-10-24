@@ -6,6 +6,7 @@ export class SerumScene {
   public camera: THREE.PerspectiveCamera;
   public renderer?: THREE.WebGLRenderer;
   public simControls?: OrbitControls;
+  private isAttachedToXRScene = false;
   public rootAnchor: THREE.Group;
   /** Independent SLAM/world-space parent used after image tracking handoff. */
   public worldAnchorGroup: THREE.Group;
@@ -59,7 +60,6 @@ export class SerumScene {
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
       this.renderer.toneMappingExposure = 1.05;
-      this.setupStudioEnvironment(this.renderer);
 
       // Desktop simulation: luxury OrbitControls for 360 inspection
       this.simControls = new OrbitControls(this.camera, canvas);
@@ -112,69 +112,6 @@ export class SerumScene {
     }
   }
 
-  private studioEnvMap: THREE.Texture | null = null;
-
-  /**
-   * Generates a studio softbox environment texture exclusively for reflective water/droplet materials.
-   * Does NOT assign to scene.environment to avoid washing out the stone pedestal, petals, and bottle label.
-   */
-  public setupStudioEnvironment(renderer: THREE.WebGLRenderer): void {
-    if (this.studioEnvMap) return;
-
-    try {
-      const pmremGenerator = new THREE.PMREMGenerator(renderer);
-      pmremGenerator.compileEquirectangularShader();
-
-      const studio = new THREE.Scene();
-      // Neutral dark studio background so it only reflects light panels without blowing out diffuse objects
-      studio.background = new THREE.Color(0x0f131a);
-
-      // Key softbox panel
-      const keyBoxGeo = new THREE.PlaneGeometry(3, 4);
-      const keyBoxMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      const keyBox = new THREE.Mesh(keyBoxGeo, keyBoxMat);
-      keyBox.position.set(2.5, 3.5, 2.5);
-      keyBox.lookAt(0, 0, 0);
-      studio.add(keyBox);
-
-      // Rim softbox panel (soft rose-gold warm reflection)
-      const rimBoxGeo = new THREE.PlaneGeometry(2, 3);
-      const rimBoxMat = new THREE.MeshBasicMaterial({ color: 0xffeedd });
-      const rimBox = new THREE.Mesh(rimBoxGeo, rimBoxMat);
-      rimBox.position.set(-2.5, 2.5, -2.5);
-      rimBox.lookAt(0, 0, 0);
-      studio.add(rimBox);
-
-      // Top softbox panel
-      const topBoxGeo = new THREE.PlaneGeometry(3, 3);
-      const topBoxMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      const topBox = new THREE.Mesh(topBoxGeo, topBoxMat);
-      topBox.position.set(0, 4.0, 0);
-      topBox.rotation.x = Math.PI / 2;
-      studio.add(topBox);
-
-      const renderTarget = pmremGenerator.fromScene(studio, 0.04);
-      this.studioEnvMap = renderTarget.texture;
-
-      // Ensure scene.environment is null so the stone, flowers, and bottle retain their natural contrast & rich textures
-      this.scene.environment = null;
-
-      keyBoxGeo.dispose();
-      keyBoxMat.dispose();
-      rimBoxGeo.dispose();
-      rimBoxMat.dispose();
-      topBoxGeo.dispose();
-      topBoxMat.dispose();
-      pmremGenerator.dispose();
-    } catch {
-      // The AR scene remains usable without the generated studio environment.
-    }
-  }
-
-  public getStudioEnvMap(): THREE.Texture | null {
-    return this.studioEnvMap;
-  }
-
   private setupLighting(): void {
     // Bright, vibrant, clean studio lighting matching original crystal clarity
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x2d1f1c, 0.60);
@@ -200,6 +137,7 @@ export class SerumScene {
    * Attaches rootAnchor and lights directly into 8th Wall's internal Three.js XR Scene
    */
   public attachToXRScene(xrScene: THREE.Scene, xrCamera: THREE.Camera, xrRenderer?: THREE.WebGLRenderer): void {
+    this.isAttachedToXRScene = true;
     if (this.rootAnchor.parent !== xrScene) {
       xrScene.add(this.rootAnchor);
     }
@@ -220,12 +158,13 @@ export class SerumScene {
       xrRenderer.toneMapping = THREE.ACESFilmicToneMapping;
       xrRenderer.toneMappingExposure = 1.05;
       xrRenderer.shadowMap.enabled = false;
-      this.setupStudioEnvironment(xrRenderer);
       xrScene.environment = null; // Do NOT blow out xrScene with global IBL
+      this.resizeXRCanvasToViewport();
     }
   }
 
   public attachToSimScene(): void {
+    this.isAttachedToXRScene = false;
     if (this.rootAnchor.parent !== this.scene) {
       this.scene.add(this.rootAnchor);
     }
@@ -237,9 +176,20 @@ export class SerumScene {
   }
 
   public handleResize(): void {
+    if (this.isAttachedToXRScene) {
+      // Keep the XR8 canvas/drawing buffer matched to the viewport, but leave
+      // its camera intrinsics and projection matrix under XR8's control.
+      this.resizeXRCanvasToViewport();
+      return;
+    }
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer?.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  private resizeXRCanvasToViewport(): void {
+    if (!this.renderer) return;
+    this.renderer.setSize(Math.max(1, window.innerWidth), Math.max(1, window.innerHeight));
   }
 
   public render(): void {

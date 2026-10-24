@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-type DebugCategory = 'SESSION' | 'TRACKING' | 'ANCHOR' | 'MODEL' | 'RENDER' | 'ANALYZER' | 'TEST';
+type DebugCategory = 'SESSION' | 'TRACKING' | 'ANCHOR' | 'MODEL' | 'RENDER' | 'ANALYZER' | 'TEST' | 'PERF';
 type Confidence = 'CONFIRMED' | 'SUSPECTED' | 'UNKNOWN';
 
 export interface WorldTrackingThresholds {
@@ -190,6 +190,8 @@ const MAX_SAVED_CAPTURES = 5;
 const MAX_BRIDGE_QUEUE = 500;
 const BRIDGE_FLUSH_INTERVAL_MS = 900;
 const BRIDGE_BATCH_LIMIT = 70;
+const BRIDGE_RETRY_INITIAL_MS = 1_000;
+const BRIDGE_RETRY_MAX_MS = 30_000;
 const MATRIX_STALE_EPSILON = 1e-5;
 const BRIDGE_ANOMALY_INTERVAL_MS = 500;
 const THROTTLED_BRIDGE_EVENTS = new Set([
@@ -264,6 +266,21 @@ function configuredEnabled(): boolean {
 
 export const DEBUG_WORLD_TRACKING = configuredEnabled();
 
+function configuredPerformanceEnabled(): boolean {
+  if (!IS_DEV_BUILD || typeof window === 'undefined') return false;
+  const query = new URLSearchParams(window.location.search);
+  let storageFlag = false;
+  try {
+    storageFlag = window.localStorage.getItem('DEBUG_AR_PERF') === '1';
+  } catch {
+    // URL and Vite environment flags remain available when storage is blocked.
+  }
+  return (import.meta as any).env?.VITE_DEBUG_AR_PERF === 'true' ||
+    query.get('debugARPerf') === '1' || storageFlag;
+}
+
+export const DEBUG_AR_PERF = configuredPerformanceEnabled();
+
 function queryThresholds(): Partial<WorldTrackingThresholds> {
   if (typeof window === 'undefined') return {};
   const query = new URLSearchParams(window.location.search);
@@ -291,6 +308,7 @@ function sdkFrameId(context: XR8FrameContext): number | string | null {
 
 export class WorldTrackingDebugger {
   private enabled = DEBUG_WORLD_TRACKING;
+  private performanceEnabled = DEBUG_AR_PERF;
   private sessionId = 'S00000';
   private sequenceId = 0;
   private trackingFrameSequence = 0;
@@ -336,6 +354,12 @@ export class WorldTrackingDebugger {
   private wrappedRender: THREE.WebGLRenderer['render'] | null = null;
   private bridgeTimer: number | null = null;
   private pageHideHandler: (() => void) | null = null;
+  private bridgeFlushInFlight = false;
+  private bridgeRetryNotBefore = 0;
+  private bridgeRetryDelayMs = BRIDGE_RETRY_INITIAL_MS;
+  private bridgePermanentFailureStatus: number | null = null;
+  private bridgeFailureNoticeLogged = false;
+  private bridgeGeneration = 0;
   private lastBridgeAttemptAt = 0;
   private recentAnomalyAt = 0;
   private lastDuplicateRenderFrame = -1;
@@ -381,6 +405,7 @@ export class WorldTrackingDebugger {
 
   public start(): void {
     if (this.sessionStartedAt > 0) this.stop();
+    this.bridgeGeneration += 1;
     this.sessionStartedAt = performance.now();
     this.sessionId = `S${Date.now().toString(36).slice(-5).toUpperCase()}`;
     this.sequenceId = 0;
@@ -389,6 +414,10 @@ export class WorldTrackingDebugger {
     this.currentXr8FrameId = null;
     this.currentTrackingState = 'UNKNOWN';
     this.lastRawPose = null;
+    this.bridgePermanentFailureStatus = null;
+    this.bridgeFailureNoticeLogged = false;
+    this.bridgeRetryNotBefore = 0;
+    this.bridgeRetryDelayMs = BRIDGE_RETRY_INITIAL_MS;
     this.lastTrackingStatus = null;
     this.lastProjection = null;
     this.lastFrameTimestamp = 0;
@@ -425,38 +454,47 @@ export class WorldTrackingDebugger {
     this.rootCauseReports = [];
     this.bridgeQueue = [];
     this.refreshThresholds();
-    if (!this.enabled) {
+    if (!this.enabled && !this.performanceEnabled) {
       if (IS_DEV_BUILD) {
-        console.log('[WORLD_AR][DEBUG_DISABLED] Add ?debugWorldTracking=1 to the page URL to print tracking diagnostics in Safari and the Vite terminal.');
+        console.log('[WORLD_AR][DEBUG_DISABLED] Add ?debugWorldTracking=1 for tracking diagnostics or ?debugARPerf=1 for lightweight performance samples.');
       }
       return;
     }
 
     this.startBridge();
-    this.record('SESSION', 'SESSION_STARTED', {
-      debugEnabled: true,
-      runtime: 'development',
-      thresholdConfiguration: this.thresholds,
-      sdkCapabilities: {
-        publicFrameIdDocumented: false,
-        publicPoseTimestampDocumented: false,
-        publicTrackingConfidenceDocumented: false,
-        trackingStatus: 'reality.trackingStatus and reality.trackingReason',
-        framePose: 'processCpuResult.reality.position and rotation',
-      },
-    }, { bridge: true });
-    this.record('TRACKING', 'TRACKING_INITIALIZED', {
-      status: 'UNKNOWN',
-      detail: 'Waiting for the first XR8 reality pose/status sample.',
-    }, { bridge: true });
+    if (this.enabled) {
+      this.record('SESSION', 'SESSION_STARTED', {
+        debugEnabled: true,
+        runtime: 'development',
+        thresholdConfiguration: this.thresholds,
+        sdkCapabilities: {
+          publicFrameIdDocumented: false,
+          publicPoseTimestampDocumented: false,
+          publicTrackingConfidenceDocumented: false,
+          trackingStatus: 'reality.trackingStatus and reality.trackingReason',
+          framePose: 'processCpuResult.reality.position and rotation',
+        },
+      }, { bridge: true });
+      this.record('TRACKING', 'TRACKING_INITIALIZED', {
+        status: 'UNKNOWN',
+        detail: 'Waiting for the first XR8 reality pose/status sample.',
+      }, { bridge: true });
+    }
+    if (this.performanceEnabled) {
+      this.record('PERF', 'MONITOR_STARTED', {
+        sampleIntervalMs: 2000,
+        scope: 'XR8 update callback and Three.js renderer CPU submission',
+      }, { bridge: true });
+    }
   }
 
   public stop(): void {
     if (this.sessionStartedAt === 0) return;
     if (this.enabled) {
       this.record('SESSION', 'SESSION_STOPPED', { elapsedMs: round(performance.now() - this.sessionStartedAt, 1) }, { bridge: true });
-      void this.flushBridge();
     }
+    if (this.performanceEnabled) this.record('PERF', 'MONITOR_STOPPED', { elapsedMs: round(performance.now() - this.sessionStartedAt, 1) }, { bridge: true });
+    if (this.enabled || this.performanceEnabled) void this.flushBridge();
     this.stopBridge();
     this.restoreRenderer();
     this.objects = { scene: null, camera: null, renderer: null, targetAnchor: null, worldAnchor: null, productRoot: null, storyGroup: null, bottleGroup: null, modelRoot: null };
@@ -480,7 +518,7 @@ export class WorldTrackingDebugger {
       this.record('SESSION', 'DEBUG_DISABLED', {}, { bridge: true });
       void this.flushBridge();
       this.enabled = false;
-      this.stopBridge();
+      if (!this.performanceEnabled) this.stopBridge();
       this.restoreRenderer();
       return;
     }
@@ -564,6 +602,15 @@ export class WorldTrackingDebugger {
   public recordTrackingStatus(status: string, reason: string, source = 'reality.trackingstatus event'): void {
     if (!this.enabled) return;
     this.applyTrackingStatus(status, reason, source);
+  }
+
+  public recordPerformanceSample(payload: Record<string, unknown>, trackingFrameSequence: number): void {
+    if (!this.performanceEnabled || !IS_DEV_BUILD) return;
+    this.record('PERF', 'PERFORMANCE_SAMPLE', payload, {
+      trackingFrameSequence,
+      xr8FrameId: null,
+      bridge: true,
+    });
   }
 
   public beginFrame(context: XR8FrameContext): void {
@@ -668,6 +715,17 @@ export class WorldTrackingDebugger {
   public captureTransform(object: THREE.Object3D | null | undefined): TransformSnapshot | null {
     if (!this.enabled || !object) return null;
     return this.snapshotObject(object);
+  }
+
+  public getLastTransformWriter(object: THREE.Object3D | null | undefined): {
+    source: string;
+    reason: string;
+    sequenceId: number;
+    at: number;
+  } | null {
+    if (!this.enabled || !object) return null;
+    const writer = this.lastWriterByObject.get(object.uuid);
+    return writer ? { ...writer } : null;
   }
 
   public recordTransformWrite(
@@ -791,7 +849,8 @@ export class WorldTrackingDebugger {
   }
 
   public async flushBridge(): Promise<void> {
-    if (!this.enabled || this.bridgeQueue.length === 0 || typeof fetch === 'undefined') return;
+    if ((!this.enabled && !this.performanceEnabled) || this.bridgeQueue.length === 0 || typeof fetch === 'undefined' ||
+      this.bridgePermanentFailureStatus !== null || this.bridgeFlushInFlight || performance.now() < this.bridgeRetryNotBefore) return;
     const records: DebugRecord[] = [];
     for (const candidate of this.bridgeQueue.slice(0, BRIDGE_BATCH_LIMIT)) {
       const proposed = [...records, candidate];
@@ -808,26 +867,61 @@ export class WorldTrackingDebugger {
     const envelope: BridgeEnvelope = { sessionId: this.sessionId, records };
     const body = JSON.stringify(envelope);
     const startedAt = performance.now();
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const response = await fetch('/__world_tracking_debug', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-          keepalive: body.length < 60_000,
-        });
-        if (!response.ok) throw new Error(`bridge status ${response.status}`);
-        this.lastBridgeAttemptAt = performance.now();
-        if (this.lastBridgeAttemptAt - startedAt > 100) {
-          // Transport is asynchronous; this only records latency in the next batch.
-          this.record('RENDER', 'DEBUG_BRIDGE_SLOW', { elapsedMs: round(this.lastBridgeAttemptAt - startedAt, 1) }, { bridge: false });
+    const flushGeneration = this.bridgeGeneration;
+    this.bridgeFlushInFlight = true;
+    let retryAfterMs = 0;
+    try {
+      const response = await fetch('/__world_tracking_debug', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: body.length < 60_000,
+      });
+      if (!response.ok) {
+        const retryableClientError = [408, 425, 429].includes(response.status);
+        if (response.status >= 400 && response.status < 500 && !retryableClientError) {
+          if (flushGeneration === this.bridgeGeneration) {
+            this.bridgePermanentFailureStatus = response.status;
+            this.bridgeQueue = [];
+            this.stopBridge();
+            if (!this.bridgeFailureNoticeLogged && IS_DEV_BUILD && typeof console !== 'undefined') {
+              console.warn(`[WORLD_AR][BRIDGE][PAUSED] permanent HTTP ${response.status}; reload after fixing the bridge configuration.`);
+              this.bridgeFailureNoticeLogged = true;
+            }
+          }
+          return;
         }
-        return;
-      } catch {
-        if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 180 * (attempt + 1)));
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers.get('Retry-After'));
+          if (Number.isFinite(retryAfter) && retryAfter > 0) retryAfterMs = Math.min(retryAfter * 1_000, BRIDGE_RETRY_MAX_MS);
+        }
+        throw new Error(`bridge status ${response.status}`);
       }
+
+      this.lastBridgeAttemptAt = performance.now();
+      if (flushGeneration === this.bridgeGeneration) {
+        this.bridgeRetryNotBefore = 0;
+        this.bridgeRetryDelayMs = BRIDGE_RETRY_INITIAL_MS;
+        this.bridgeFailureNoticeLogged = false;
+      }
+      if (flushGeneration === this.bridgeGeneration && this.lastBridgeAttemptAt - startedAt > 100) {
+        // Transport is asynchronous; this only records latency in the next batch.
+        this.record('RENDER', 'DEBUG_BRIDGE_SLOW', { elapsedMs: round(this.lastBridgeAttemptAt - startedAt, 1) }, { bridge: false });
+      }
+    } catch {
+      if (flushGeneration === this.bridgeGeneration) {
+        this.bridgeQueue = [...records, ...this.bridgeQueue].slice(-MAX_BRIDGE_QUEUE);
+        const retryDelayMs = Math.max(retryAfterMs, this.bridgeRetryDelayMs);
+        this.bridgeRetryNotBefore = performance.now() + retryDelayMs;
+        this.bridgeRetryDelayMs = Math.min(this.bridgeRetryDelayMs * 2, BRIDGE_RETRY_MAX_MS);
+        if (!this.bridgeFailureNoticeLogged && IS_DEV_BUILD && typeof console !== 'undefined') {
+          console.warn(`[WORLD_AR][BRIDGE][RETRY] transient failure; next attempt in ${retryDelayMs} ms.`);
+          this.bridgeFailureNoticeLogged = true;
+        }
+      }
+    } finally {
+      this.bridgeFlushInFlight = false;
     }
-    this.bridgeQueue = [...records, ...this.bridgeQueue].slice(-MAX_BRIDGE_QUEUE);
   }
 
   private refreshThresholds(): void {
@@ -836,7 +930,8 @@ export class WorldTrackingDebugger {
   }
 
   private startBridge(): void {
-    if (!this.enabled || typeof window === 'undefined' || this.bridgeTimer !== null) return;
+    if ((!this.enabled && !this.performanceEnabled) || this.bridgePermanentFailureStatus !== null ||
+      typeof window === 'undefined' || this.bridgeTimer !== null) return;
     this.bridgeTimer = window.setInterval(() => { void this.flushBridge(); }, BRIDGE_FLUSH_INTERVAL_MS);
     this.pageHideHandler = () => { void this.flushBridge(); };
     window.addEventListener('pagehide', this.pageHideHandler);
@@ -878,7 +973,7 @@ export class WorldTrackingDebugger {
     this.updateCaptures(record);
     if (options.bridge && this.shouldBridgeEvent(category, eventName, monotonicMs)) {
       this.enqueueBridge(record);
-      if (IS_DEV_BUILD && typeof console !== 'undefined') {
+      if (this.bridgePermanentFailureStatus === null && IS_DEV_BUILD && typeof console !== 'undefined') {
         const frame = record.xr8FrameId ?? record.trackingFrameSequence ?? '-';
         const diagnosticPayload = {
           ...record.payload,
@@ -888,9 +983,8 @@ export class WorldTrackingDebugger {
           trackingFrameSequence: record.trackingFrameSequence,
           trackingState: record.trackingState,
         };
-        console.log(
-          `[WORLD_AR][${record.sessionId}][${record.timestamp}][F${frame}][${record.category}][${record.eventName}] ${JSON.stringify(diagnosticPayload)}`
-        );
+        const prefix = record.category === 'PERF' ? 'AR_PERF' : 'WORLD_AR';
+        console.log(`[${prefix}][${record.sessionId}][${record.timestamp}][F${frame}][${record.category}][${record.eventName}] ${JSON.stringify(diagnosticPayload)}`);
       }
     }
     if (options.capture) this.startCaptureFor(record);
@@ -905,6 +999,7 @@ export class WorldTrackingDebugger {
   }
 
   private enqueueBridge(record: DebugRecord): void {
+    if (this.bridgePermanentFailureStatus !== null) return;
     if (this.bridgeQueue.length >= MAX_BRIDGE_QUEUE) this.bridgeQueue.shift();
     this.bridgeQueue.push(record);
   }

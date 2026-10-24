@@ -17,6 +17,11 @@ export class ImageTrackingController {
   private static readonly MATRIX_ERROR_TOLERANCE = 1e-5;
   private static readonly ORIGIN_SHIFT_REBASE_DISTANCE_M = 1;
   private static readonly ORIGIN_SHIFT_REBASE_ROTATION_DEG = 120;
+  private static readonly MAX_POSE_DELTA_SECONDS = 0.1;
+  private static readonly REACQUIRE_DELTA_SECONDS = 1 / 30;
+  private static readonly MAX_REACQUIRE_POSITION_SPEED_MPS = 1.5;
+  private static readonly MAX_REACQUIRE_ROTATION_SPEED_RAD_PER_SEC = 3.5;
+  private static readonly MAX_REACQUIRE_SCALE_SPEED_PER_SEC = 0.75;
 
   private targetGroup: THREE.Group;
   private productRoot: THREE.Group;
@@ -48,6 +53,7 @@ export class ImageTrackingController {
   private currentAnchorCameraPosition = new THREE.Vector3();
   private currentAnchorCameraQuaternion = new THREE.Quaternion();
   private currentAnchorCameraMatrix = new THREE.Matrix4();
+  private diagnosticSerumWorldPosition = new THREE.Vector3();
   private previousAnchorCameraSampleAt = 0;
   private peakAnchorCameraPositionStep = 0;
   private peakAnchorCameraRotationStep = 0;
@@ -65,9 +71,11 @@ export class ImageTrackingController {
     projectedBoundsFullyInsideViewport: boolean;
     projectedCenterX: number | null;
     projectedCenterY: number | null;
+    cameraPosition: THREE.Vector3;
     anchorPosition: THREE.Vector3;
     anchorQuaternion: THREE.Quaternion;
     anchorScale: THREE.Vector3;
+    sampledAt: number;
   } | null = null;
   private loggedIgnoredEvents = new Set<string>();
   private lastCameraSample = {
@@ -84,6 +92,8 @@ export class ImageTrackingController {
   private filteredAngularVelocity = 0;
   private previousRawScale = 1;
   private filteredScaleVelocity = 0;
+  private previousRawProductScale = 1;
+  private filteredProductScaleVelocity = 0;
   private tmpPositionVelocity = new THREE.Vector3();
   private tmpPositionDelta = new THREE.Vector3();
   private tmpTargetQuat = new THREE.Quaternion();
@@ -95,16 +105,19 @@ export class ImageTrackingController {
   private stableSince = 0;
   private stableSamples = 0;
   private cameraPoseStableAfter = 0;
+  private cameraPoseDiscontinuityAt = 0;
   private imageUpdateCount = 0;
+  private lastPoseSmoothingSampleAt = 0;
+  private lastApproachSampleAt = 0;
+  private worldLockEstablishedAt: number | null = null;
+  private readonly imagePoseSmoothingDisabled: boolean;
   private lastStabilityDelta = { position: 0, rotation: 0, scale: 0, width: 0 };
 
   private static readonly Z_AXIS = new THREE.Vector3(0, 0, 1);
   private static readonly MATRIX_ELEMENTS = 16;
 
-  private static smoothingAlpha(cutoffHz: number, dt: number): number {
-    const safeCutoff = Math.max(0.01, cutoffHz);
-    const tau = 1 / (2 * Math.PI * safeCutoff);
-    return dt / (dt + tau);
+  private static smoothingAlpha(lambdaPerSecond: number, dt: number): number {
+    return 1 - Math.exp(-Math.max(0.01, lambdaPerSecond) * dt);
   }
 
   public onFound?: (pose: ImagePose) => void;
@@ -127,6 +140,10 @@ export class ImageTrackingController {
     this.normalizedModelHeight = normalizedModelHeight;
     this.diagnosticModelRoot = diagnosticModelRoot;
     this.diagnosticCanvas = diagnosticCanvas;
+    // Diagnostic A/B switch for image-pose filtering; world-locked transforms are unaffected.
+    this.imagePoseSmoothingDisabled = worldTrackingDebugger.isEnabled &&
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('debugImagePoseSmoothing') === '0';
     this.setTargetVisibility(false, 'controller initialized');
     this.worldAnchorGroup.visible = false;
     traceAR('CONTROLLER_READY', {
@@ -193,6 +210,14 @@ export class ImageTrackingController {
         trackingReady ? 'info' : 'warn',
         `[AR_ANCHOR] World Tracking ${status} (${reason}); anchorReady=${trackingReady}; state=${this.state}; camera=${this.cameraWorldPosition()}`
       );
+      worldTrackingDebugger.recordEvent('TRACKING', 'WORLD_TRACKING_STATUS', {
+        status,
+        reason,
+        anchorReady: trackingReady,
+        imageTracked: this.isTracked,
+        trackingState: this.state,
+        cameraWorldPosition: this.cameraWorldPosition(),
+      }, { bridge: true });
     }
   }
 
@@ -209,10 +234,21 @@ export class ImageTrackingController {
     this.hasSeenTarget = true;
     this.isTracked = true;
     this.transitionTo('STABILIZING', 'image target found');
+    this.sampleCameraPose('imagefound');
     this.applyPose(pose, rotationDeg, !this.hasPose);
     this.setTargetVisibility(true, 'image target found');
     this.resetStabilityWindow(pose);
-    this.sampleCameraPose('imagefound');
+    worldTrackingDebugger.recordEvent('TRACKING', 'IMAGE_TARGET_DETECTED', {
+      target: pose.name,
+      rawPosition: [pose.position.x, pose.position.y, pose.position.z],
+      rawQuaternion: [pose.quaternion.x, pose.quaternion.y, pose.quaternion.z, pose.quaternion.w],
+      rawScale: pose.scale,
+      scaledWidth: pose.scaledWidth ?? null,
+      scaledHeight: pose.scaledHeight ?? null,
+      trackingState: this.state,
+      productParent: this.productRoot.parent?.name || '(none)',
+    }, { bridge: true });
+    this.recordApproachDiagnostics();
     traceAR('IMAGE_FOUND', {
       target: pose.name,
       firstDetection,
@@ -233,11 +269,12 @@ export class ImageTrackingController {
     if (this.state !== 'STABILIZING' || !this.isValidPose(pose)) return false;
 
     this.isTracked = true;
+    this.sampleCameraPose('imageupdated');
     this.applyPose(pose, rotationDeg, false);
     this.setTargetVisibility(true, 'image target pose updated');
     this.onUpdated?.(pose);
-    this.sampleCameraPose('imageupdated');
     this.imageUpdateCount += 1;
+    this.recordApproachDiagnostics();
 
     const now = performance.now();
     const poseStable = this.isPoseStable(pose, now);
@@ -278,6 +315,14 @@ export class ImageTrackingController {
     if (!this.hasSeenTarget) return;
 
     this.isTracked = false;
+    worldTrackingDebugger.recordEvent('TRACKING', 'IMAGE_TARGET_LOST', {
+      trackingState: this.state,
+      worldTrackingStatus: this.worldTrackingStatus,
+      worldTrackingReason: this.worldTrackingReason,
+      productParent: this.productRoot.parent?.name || '(none)',
+      action: this.state === 'ANCHORED' ? 'retain world-locked pose' : 'retain last valid image pose',
+    }, { bridge: true });
+    this.recordApproachDiagnostics();
     const stableElapsedMs = this.stableSince > 0 ? performance.now() - this.stableSince : 0;
     traceAR('IMAGE_LOST', {
       state: this.state,
@@ -324,6 +369,7 @@ export class ImageTrackingController {
     }
     this.integrityWarning = fault;
     this.reportAnchorFrameDiagnostics(fault, matrixError);
+    this.recordApproachDiagnostics();
   }
 
   private reportAnchorFrameDiagnostics(fault: string, matrixError: number): void {
@@ -364,6 +410,69 @@ export class ImageTrackingController {
     this.peakCameraRotationRateDegPerSec = 0;
   }
 
+  /** Low-rate approach telemetry; sampled from existing image/XR callbacks only. */
+  private recordApproachDiagnostics(): void {
+    const now = performance.now();
+    if (!worldTrackingDebugger.isEnabled || !this.camera || !this.diagnosticModelRoot ||
+      now - this.lastApproachSampleAt < 1000) return;
+    this.lastApproachSampleAt = now;
+    const processingStartedAt = performance.now();
+
+    this.camera.updateWorldMatrix(true, false);
+    this.camera.getWorldPosition(this.currentAnchorCameraPosition);
+    this.camera.getWorldQuaternion(this.currentAnchorCameraQuaternion);
+    this.productRoot.updateWorldMatrix(true, false);
+    const matrixError = this.state === 'ANCHORED' && this.expectedWorldMatrix
+      ? this.maxMatrixDifference(this.productRoot.matrixWorld, this.expectedWorldMatrix)
+      : null;
+    const sampleWindowMs = this.previousVisualSample
+      ? now - this.previousVisualSample.sampledAt
+      : 0;
+    const diagnostics = this.collectModelCameraDiagnostics(matrixError ?? 0, sampleWindowMs);
+    const perspectiveCamera = this.camera as THREE.PerspectiveCamera;
+    const productWriter = worldTrackingDebugger.getLastTransformWriter(this.productRoot);
+    const anchorWriter = worldTrackingDebugger.getLastTransformWriter(this.worldAnchorGroup);
+
+    this.productRoot.getWorldPosition(this.diagnosticSerumWorldPosition);
+    worldTrackingDebugger.recordEvent('MODEL', 'WORLD_APPROACH_SAMPLE', {
+      ...diagnostics,
+      sampleMonotonicMs: Number(now.toFixed(1)),
+      approachSampleIntervalMs: sampleWindowMs > 0 ? Number(sampleWindowMs.toFixed(1)) : null,
+      approachSampleRateHz: sampleWindowMs > 0 ? Number((1000 / sampleWindowMs).toFixed(1)) : null,
+      diagnosticProcessingMs: Number((performance.now() - processingStartedAt).toFixed(2)),
+      trackingMode: this.state === 'ANCHORED' ? 'WORLD_LOCKED' : 'IMAGE_TRACKING',
+      imageTrackingDetected: this.isTracked,
+      worldTrackingStatus: this.worldTrackingStatus,
+      worldTrackingReason: this.worldTrackingReason,
+      productParent: this.productRoot.parent?.name || '(none)',
+      targetParent: this.targetGroup.parent?.name || '(none)',
+      worldAnchorParent: this.worldAnchorGroup.parent?.name || '(none)',
+      cameraWorldPosition: this.vectorDescription(this.currentAnchorCameraPosition),
+      cameraWorldQuaternion: this.quaternionDescription(this.currentAnchorCameraQuaternion),
+      serumWorldPosition: this.vectorDescription(this.diagnosticSerumWorldPosition),
+      serumWorldScale: this.vectorDescription(this.productRoot.getWorldScale(new THREE.Vector3())),
+      cameraFovDeg: perspectiveCamera.isPerspectiveCamera ? perspectiveCamera.fov : null,
+      cameraNear: perspectiveCamera.isPerspectiveCamera ? perspectiveCamera.near : null,
+      cameraFar: perspectiveCamera.isPerspectiveCamera ? perspectiveCamera.far : null,
+      cameraZoom: perspectiveCamera.isPerspectiveCamera ? perspectiveCamera.zoom : null,
+      cameraProjectionMatrix: this.camera.projectionMatrix.toArray(),
+      worldMatrixError: matrixError === null ? null : Number(matrixError.toExponential(3)),
+      latestProductTransformWriter: productWriter
+        ? { ...productWriter, ageMs: Number((now - productWriter.at).toFixed(1)) }
+        : null,
+      latestWorldAnchorTransformWriter: anchorWriter
+        ? { ...anchorWriter, ageMs: Number((now - anchorWriter.at).toFixed(1)) }
+        : null,
+      worldLockEstablishedAtMonotonicMs: this.worldLockEstablishedAt === null
+        ? null
+        : Number(this.worldLockEstablishedAt.toFixed(1)),
+      worldLockAgeMs: this.worldLockEstablishedAt === null
+        ? null
+        : Number((now - this.worldLockEstablishedAt).toFixed(1)),
+      imagePoseSmoothingEnabled: !this.imagePoseSmoothingDisabled,
+    }, { bridge: true });
+  }
+
   private collectModelCameraDiagnostics(matrixError: number, windowDurationMs: number): Record<string, unknown> {
     const camera = this.camera;
     const modelRoot = this.diagnosticModelRoot;
@@ -383,6 +492,7 @@ export class ImageTrackingController {
     }
 
     camera.updateWorldMatrix(true, false);
+    camera.getWorldPosition(this.currentAnchorCameraPosition);
     modelRoot.updateWorldMatrix(true, true);
     this.productRoot.updateWorldMatrix(true, false);
     const modelScale = modelRoot.getWorldScale(new THREE.Vector3());
@@ -393,6 +503,7 @@ export class ImageTrackingController {
     const modelBoundsSize = modelBounds.isEmpty() ? new THREE.Vector3() : modelBounds.getSize(new THREE.Vector3());
     const modelBoundsCenter = modelBounds.isEmpty() ? modelRoot.getWorldPosition(new THREE.Vector3()) : modelBounds.getCenter(new THREE.Vector3());
     const cameraDistance = this.currentAnchorCameraPosition.distanceTo(modelBoundsCenter);
+    const sampleAt = performance.now();
 
     const projection = this.projectModelBounds(modelBounds);
     const scaleChange = this.previousVisualSample
@@ -416,6 +527,12 @@ export class ImageTrackingController {
           rotationDeg: Number(THREE.MathUtils.radToDeg(anchorQuaternion.angleTo(this.previousVisualSample.anchorQuaternion)).toFixed(4)),
           scaleRatio: this.vectorRatio(productScale, this.previousVisualSample.anchorScale),
         }
+      : null;
+    const cameraMovementSincePreviousSample = this.previousVisualSample
+      ? this.currentAnchorCameraPosition.distanceTo(this.previousVisualSample.cameraPosition)
+      : null;
+    const cameraDistanceDeltaSincePreviousSample = this.previousVisualSample
+      ? cameraDistance - this.previousVisualSample.distanceM
       : null;
     const projectedCenterDeltaPx = projection && projection.centerX !== null && projection.centerY !== null &&
       this.previousVisualSample && this.previousVisualSample.projectedCenterX !== null &&
@@ -462,8 +579,17 @@ export class ImageTrackingController {
       modelWorldScaleRatioSincePreviousSample: scaleChange,
       modelBoundsWorldM: this.vectorDescription(modelBoundsSize),
       cameraPosition: this.vectorDescription(this.currentAnchorCameraPosition),
+      cameraMovementSincePreviousSampleM: cameraMovementSincePreviousSample === null
+        ? null
+        : Number(cameraMovementSincePreviousSample.toFixed(4)),
       modelCenterWorld: this.vectorDescription(modelBoundsCenter),
       cameraDistanceToModelM: Number(cameraDistance.toFixed(4)),
+      cameraDistanceDeltaSincePreviousSampleM: cameraDistanceDeltaSincePreviousSample === null
+        ? null
+        : Number(cameraDistanceDeltaSincePreviousSample.toFixed(4)),
+      sampleIntervalMs: this.previousVisualSample
+        ? Number((sampleAt - this.previousVisualSample.sampledAt).toFixed(1))
+        : null,
       projectedSizeCssPx: projection ? { width: Number(projection.widthPx.toFixed(1)), height: Number(projection.heightPx.toFixed(1)) } : null,
       projectedCenterViewport: projection && projection.centerX !== null && projection.centerY !== null
         ? { x: Number(projection.centerX.toFixed(4)), y: Number(projection.centerY.toFixed(4)) }
@@ -498,9 +624,11 @@ export class ImageTrackingController {
       projectedBoundsFullyInsideViewport: projection?.fullyInsideViewport ?? false,
       projectedCenterX: projection?.centerX ?? null,
       projectedCenterY: projection?.centerY ?? null,
+      cameraPosition: this.currentAnchorCameraPosition.clone(),
       anchorPosition: anchorPosition.clone(),
       anchorQuaternion: anchorQuaternion.clone(),
       anchorScale: productScale.clone(),
+      sampledAt: sampleAt,
     };
     return sample;
   }
@@ -1002,6 +1130,7 @@ export class ImageTrackingController {
     this.handoffFailureLogged = false;
     this.lastHandoffFailureReason = '';
     this.resetStabilityWindow();
+    this.worldLockEstablishedAt = performance.now();
     this.transitionTo('ANCHORED', 'world matrix verified after reparent');
     logger.log(
       'info',
@@ -1021,6 +1150,16 @@ export class ImageTrackingController {
       cameraPosition: this.cameraWorldPosition(),
       imageEventsNowIgnored: true,
     });
+    worldTrackingDebugger.recordEvent('ANCHOR', 'IMAGE_TO_WORLD_LOCKED', {
+      establishedAtMonotonicMs: Number(this.worldLockEstablishedAt.toFixed(1)),
+      oldParent: originalParent.name || originalParent.type,
+      newParent: this.productRoot.parent?.name || '(none)',
+      worldPosition: this.vectorDescription(this.productRoot.getWorldPosition(this.diagnosticSerumWorldPosition)),
+      worldScale: this.vectorDescription(this.productRoot.getWorldScale(new THREE.Vector3())),
+      worldMatrixError: Number(finalError.toExponential(3)),
+      imageTrackingCallbacksIgnoredAfterHandoff: true,
+    }, { bridge: true });
+    this.recordApproachDiagnostics();
     return true;
   }
 
@@ -1096,6 +1235,7 @@ export class ImageTrackingController {
 
   /** Applies the existing 8th Wall image pose and upright model fit. */
   private applyPose(pose: ImagePose, rotationDeg = 0, instant = false): void {
+    const applyStartedAt = performance.now();
     const debugTargetBefore = worldTrackingDebugger.captureTransform(this.targetGroup);
     const debugProductBefore = worldTrackingDebugger.captureTransform(this.productRoot);
     this.tmpTargetQuat.copy(pose.quaternion).normalize();
@@ -1107,6 +1247,7 @@ export class ImageTrackingController {
     }
 
     const s = pose.scale;
+    let targetProductScale = this.productRoot.scale.x;
     // Keep the model's local Y axis inside the image plane (local XY).
     // A 90-degree X rotation points the bottle out of the image instead.
     const targetRotX = 0;
@@ -1118,60 +1259,132 @@ export class ImageTrackingController {
         this.normalizedModelHeight > 0
         ? (pose.scaledHeight * ImageTrackingController.MODEL_TARGET_COVERAGE) / this.normalizedModelHeight
         : Infinity;
-      const modelScale = Math.min(widthFitScale, heightFitScale);
-      this.productRoot.scale.setScalar(modelScale);
+      targetProductScale = Math.min(widthFitScale, heightFitScale);
     }
-    // The loader places the product's base at Y=0. Move it down by half its
-    // fitted height so the complete composition is centered over the poster.
-    const fittedHeight = this.normalizedModelHeight * this.productRoot.scale.y;
-    const productOffsetY = -fittedHeight / 2;
 
     const now = performance.now();
-    if (!this.hasPose || instant) {
-      this.targetGroup.position.copy(pose.position);
-      this.targetGroup.quaternion.copy(this.tmpTargetQuat);
-      this.targetGroup.scale.setScalar(s);
-      this.seedPoseFilter(pose.position, this.tmpTargetQuat, s, now);
-      this.productRoot.position.set(0, productOffsetY, 0);
-      this.productRoot.rotation.x = targetRotX;
-      this.hasPose = true;
-      this.recordPoseTransformWrites(debugTargetBefore, debugProductBefore, pose, rotationDeg, 'Initial or instant image-target pose; no temporal smoothing was applied.');
-      return;
-    }
-
     const elapsed = (now - this.lastPoseTimestamp) / 1000;
-    let poseWriteReason = 'Image target pose updated with the existing velocity-adaptive smoothing.';
-    if (!Number.isFinite(elapsed) || elapsed > 0.45) {
+    const stalePoseSample = !Number.isFinite(elapsed) || elapsed > 0.45;
+    const rawPositionStepM = this.hasPose ? pose.position.distanceTo(this.previousRawPosition) : null;
+    const rawRotationStepDeg = this.hasPose
+      ? THREE.MathUtils.radToDeg(this.previousRawQuaternion.angleTo(this.tmpTargetQuat))
+      : null;
+    const possibleCoordinateFrameReset = this.hasPose && stalePoseSample &&
+      this.cameraPoseDiscontinuityAt > this.lastPoseTimestamp &&
+      (this.worldTrackingStatus === 'LIMITED' || now <= this.worldTrackingRecoveryUntil);
+    const resetFilter = this.imagePoseSmoothingDisabled || !this.hasPose || instant || !Number.isFinite(elapsed) || elapsed <= 0 || possibleCoordinateFrameReset;
+    let effectiveDt = 0;
+    let positionAlpha = 1;
+    let rotationAlpha = 1;
+    let imageScaleAlpha = 1;
+    let productScaleAlpha = 1;
+    let positionLambda = 0;
+    let rotationLambda = 0;
+    let imageScaleLambda = 0;
+    let productScaleLambda = 0;
+    let poseWriteReason = 'Image target pose updated with adaptive exponential smoothing.';
+
+    if (resetFilter) {
       this.targetGroup.position.copy(pose.position);
       this.targetGroup.quaternion.copy(this.tmpTargetQuat);
       this.targetGroup.scale.setScalar(s);
-      this.seedPoseFilter(pose.position, this.tmpTargetQuat, s, now);
-      poseWriteReason = 'Image pose filter re-seeded because the previous sample was stale or had invalid elapsed time.';
+      this.productRoot.scale.setScalar(targetProductScale);
+      this.seedPoseFilter(pose.position, this.tmpTargetQuat, s, targetProductScale, now);
+      this.hasPose = true;
+      if (this.imagePoseSmoothingDisabled) {
+        poseWriteReason = 'Debug override: image-pose smoothing disabled; apply each valid target pose directly for controlled comparison.';
+      } else if (possibleCoordinateFrameReset) {
+        poseWriteReason = 'Image pose filter re-seeded after a camera pose discontinuity during world-tracking recovery; interpolation across a possible coordinate-frame change is unsafe.';
+      } else if (!Number.isFinite(elapsed) || elapsed <= 0) {
+        poseWriteReason = 'Image pose filter re-seeded because the previous sample interval was invalid.';
+      } else {
+        poseWriteReason = 'Initial or explicitly instant image-target pose; no temporal smoothing was applied.';
+      }
     } else {
-      const dt = THREE.MathUtils.clamp(elapsed, 1 / 240, 0.25);
+      const reacquiredAfterGap = stalePoseSample;
+      effectiveDt = reacquiredAfterGap
+        ? ImageTrackingController.REACQUIRE_DELTA_SECONDS
+        : THREE.MathUtils.clamp(elapsed, 1 / 240, ImageTrackingController.MAX_POSE_DELTA_SECONDS);
+      if (reacquiredAfterGap) {
+        // Do not let the long lost interval produce an unbounded velocity and a one-frame snap.
+        this.filteredPositionVelocity.set(0, 0, 0);
+        this.filteredAngularVelocity = 0;
+        this.filteredScaleVelocity = 0;
+        this.filteredProductScaleVelocity = 0;
+      }
+
       this.tmpPositionDelta.subVectors(pose.position, this.previousRawPosition);
-      this.tmpPositionVelocity.copy(this.tmpPositionDelta).multiplyScalar(1 / dt);
-      const velocityAlpha = ImageTrackingController.smoothingAlpha(1.0, dt);
+      this.tmpPositionVelocity.copy(this.tmpPositionDelta).multiplyScalar(1 / effectiveDt);
+      if (reacquiredAfterGap && this.tmpPositionVelocity.length() > ImageTrackingController.MAX_REACQUIRE_POSITION_SPEED_MPS) {
+        this.tmpPositionVelocity.setLength(ImageTrackingController.MAX_REACQUIRE_POSITION_SPEED_MPS);
+      }
+      const velocityAlpha = ImageTrackingController.smoothingAlpha(2 * Math.PI, effectiveDt);
       this.filteredPositionVelocity.lerp(this.tmpPositionVelocity, velocityAlpha);
-      const positionCutoff = 0.85 + 2.5 * this.filteredPositionVelocity.length();
-      this.targetGroup.position.lerp(pose.position, ImageTrackingController.smoothingAlpha(positionCutoff, dt));
+      const positionSpeed = Math.max(0, this.filteredPositionVelocity.length() - 0.025);
+      const positionCutoffHz = 0.85 + 2.5 * positionSpeed;
+      positionLambda = 2 * Math.PI * positionCutoffHz;
+      positionAlpha = ImageTrackingController.smoothingAlpha(positionLambda, effectiveDt);
+      this.targetGroup.position.lerp(pose.position, positionAlpha);
 
-      const angularVelocity = this.previousRawQuaternion.angleTo(this.tmpTargetQuat) / dt;
+      let angularVelocity = this.previousRawQuaternion.angleTo(this.tmpTargetQuat) / effectiveDt;
+      if (reacquiredAfterGap) angularVelocity = Math.min(angularVelocity, ImageTrackingController.MAX_REACQUIRE_ROTATION_SPEED_RAD_PER_SEC);
       this.filteredAngularVelocity = THREE.MathUtils.lerp(this.filteredAngularVelocity, angularVelocity, velocityAlpha);
-      const rotationCutoff = 0.75 + 1.2 * this.filteredAngularVelocity;
-      this.targetGroup.quaternion.slerp(this.tmpTargetQuat, ImageTrackingController.smoothingAlpha(rotationCutoff, dt));
+      const angularSpeed = Math.max(0, this.filteredAngularVelocity - THREE.MathUtils.degToRad(2));
+      const rotationCutoffHz = 0.75 + 1.2 * angularSpeed;
+      rotationLambda = 2 * Math.PI * rotationCutoffHz;
+      rotationAlpha = ImageTrackingController.smoothingAlpha(rotationLambda, effectiveDt);
+      this.targetGroup.quaternion.slerp(this.tmpTargetQuat, rotationAlpha);
 
-      const scaleVelocity = Math.abs(s - this.previousRawScale) / dt;
+      let scaleVelocity = Math.abs(s - this.previousRawScale) / effectiveDt;
+      if (reacquiredAfterGap) scaleVelocity = Math.min(scaleVelocity, ImageTrackingController.MAX_REACQUIRE_SCALE_SPEED_PER_SEC);
       this.filteredScaleVelocity = THREE.MathUtils.lerp(this.filteredScaleVelocity, scaleVelocity, velocityAlpha);
-      const scaleCutoff = 0.45 + 1.2 * this.filteredScaleVelocity;
-      const scaleAlpha = ImageTrackingController.smoothingAlpha(scaleCutoff, dt);
-      this.targetGroup.scale.setScalar(THREE.MathUtils.lerp(this.targetGroup.scale.x, s, scaleAlpha));
+      const imageScaleSpeed = Math.max(0, this.filteredScaleVelocity - 0.01);
+      const imageScaleCutoffHz = 0.45 + 1.2 * imageScaleSpeed;
+      imageScaleLambda = 2 * Math.PI * imageScaleCutoffHz;
+      imageScaleAlpha = ImageTrackingController.smoothingAlpha(imageScaleLambda, effectiveDt);
+      this.targetGroup.scale.setScalar(THREE.MathUtils.lerp(this.targetGroup.scale.x, s, imageScaleAlpha));
+
+      let productScaleVelocity = Math.abs(targetProductScale - this.previousRawProductScale) / effectiveDt;
+      if (reacquiredAfterGap) productScaleVelocity = Math.min(productScaleVelocity, ImageTrackingController.MAX_REACQUIRE_SCALE_SPEED_PER_SEC);
+      this.filteredProductScaleVelocity = THREE.MathUtils.lerp(this.filteredProductScaleVelocity, productScaleVelocity, velocityAlpha);
+      const productScaleSpeed = Math.max(0, this.filteredProductScaleVelocity - 0.01);
+      const productScaleCutoffHz = 0.85 + 1.2 * productScaleSpeed;
+      productScaleLambda = 2 * Math.PI * productScaleCutoffHz;
+      productScaleAlpha = ImageTrackingController.smoothingAlpha(productScaleLambda, effectiveDt);
+      this.productRoot.scale.setScalar(THREE.MathUtils.lerp(this.productRoot.scale.x, targetProductScale, productScaleAlpha));
+      if (reacquiredAfterGap) poseWriteReason = 'Image pose reacquired in the same XR scene; filter velocities were reset and the pose is being eased from the last valid transform.';
     }
 
-    this.storeRawPose(pose.position, this.tmpTargetQuat, s, now);
-    this.productRoot.position.set(0, productOffsetY, 0);
+    this.storeRawPose(pose.position, this.tmpTargetQuat, s, targetProductScale, now);
+    // Keep the existing fitted-height centering rule tied to the filtered fit scale.
+    const fittedHeight = this.normalizedModelHeight * this.productRoot.scale.y;
+    this.productRoot.position.set(0, -fittedHeight / 2, 0);
     this.productRoot.rotation.x = targetRotX;
-    this.recordPoseTransformWrites(debugTargetBefore, debugProductBefore, pose, rotationDeg, poseWriteReason);
+
+    const smoothingDiagnostics = {
+      rawIntervalSeconds: Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null,
+      poseEventRateFps: Number.isFinite(elapsed) && elapsed > 0 ? 1 / elapsed : null,
+      rawPositionStepM,
+      rawRotationStepDeg,
+      deltaTimeSeconds: effectiveDt,
+      effectiveInputFps: effectiveDt > 0 ? 1 / effectiveDt : null,
+      positionAlpha,
+      rotationAlpha,
+      imageScaleAlpha,
+      productScaleAlpha,
+      positionLambdaPerSecond: positionLambda,
+      rotationLambdaPerSecond: rotationLambda,
+      imageScaleLambdaPerSecond: imageScaleLambda,
+      productScaleLambdaPerSecond: productScaleLambda,
+      reacquiredAfterGap: stalePoseSample && !resetFilter,
+      possibleCoordinateFrameReset,
+      imagePoseSmoothingEnabled: !this.imagePoseSmoothingDisabled,
+      worldTrackingStatus: this.worldTrackingStatus,
+      worldTrackingReason: this.worldTrackingReason,
+      processingMs: performance.now() - applyStartedAt,
+    };
+    this.recordPoseTransformWrites(debugTargetBefore, debugProductBefore, pose, rotationDeg, poseWriteReason, smoothingDiagnostics);
+    this.recordPoseSmoothingSample(pose, this.tmpTargetQuat, targetProductScale, smoothingDiagnostics, now);
   }
 
   private recordPoseTransformWrites(
@@ -1179,7 +1392,8 @@ export class ImageTrackingController {
     productBefore: ReturnType<typeof worldTrackingDebugger.captureTransform>,
     pose: ImagePose,
     rotationDeg: number,
-    reason: string
+    reason: string,
+    smoothingDiagnostics: Record<string, unknown>
   ): void {
     const posePayload = {
       targetName: pose.name,
@@ -1189,6 +1403,13 @@ export class ImageTrackingController {
       scaledWidth: pose.scaledWidth ?? null,
       scaledHeight: pose.scaledHeight ?? null,
       rotationDeg,
+      smoothedPosition: [this.targetGroup.position.x, this.targetGroup.position.y, this.targetGroup.position.z],
+      smoothedQuaternion: [this.targetGroup.quaternion.x, this.targetGroup.quaternion.y, this.targetGroup.quaternion.z, this.targetGroup.quaternion.w],
+      smoothedImageScale: this.targetGroup.scale.x,
+      targetProductScale: this.previousRawProductScale,
+      smoothedProductScale: this.productRoot.scale.x,
+      imagePoseSmoothingEnabled: !this.imagePoseSmoothingDisabled,
+      smoothing: smoothingDiagnostics,
     };
     worldTrackingDebugger.recordTransformWrite(
       'ANCHOR',
@@ -1205,22 +1426,62 @@ export class ImageTrackingController {
       'ImageTrackingController.applyPose',
       this.productRoot,
       productBefore,
-      'Set ProductRoot fit scale, vertical centering offset, and upright X rotation from the current target dimensions.',
+      'Set ProductRoot fit scale, vertical centering offset, and upright X rotation from the smoothed image-target dimensions.',
       { ...posePayload, poseWriteReason: reason }
     );
   }
 
-  private seedPoseFilter(position: THREE.Vector3, quaternion: THREE.Quaternion, scale: number, timestamp: number): void {
+  private recordPoseSmoothingSample(
+    pose: ImagePose,
+    targetQuaternion: THREE.Quaternion,
+    targetProductScale: number,
+    smoothing: Record<string, unknown>,
+    timestamp: number
+  ): void {
+    if (!worldTrackingDebugger.isEnabled || timestamp - this.lastPoseSmoothingSampleAt < 1000) return;
+    this.lastPoseSmoothingSampleAt = timestamp;
+    worldTrackingDebugger.recordEvent('ANCHOR', 'IMAGE_POSE_SMOOTHING_SAMPLE', {
+      target: pose.name,
+      trackingState: this.state,
+      detected: this.isTracked,
+      rawPosition: [pose.position.x, pose.position.y, pose.position.z],
+      rawQuaternion: [pose.quaternion.x, pose.quaternion.y, pose.quaternion.z, pose.quaternion.w],
+      correctedTargetQuaternion: [targetQuaternion.x, targetQuaternion.y, targetQuaternion.z, targetQuaternion.w],
+      smoothedPosition: [this.targetGroup.position.x, this.targetGroup.position.y, this.targetGroup.position.z],
+      smoothedQuaternion: [this.targetGroup.quaternion.x, this.targetGroup.quaternion.y, this.targetGroup.quaternion.z, this.targetGroup.quaternion.w],
+      rawImageScale: pose.scale,
+      smoothedImageScale: this.targetGroup.scale.x,
+      targetProductScale,
+      smoothedProductScale: this.productRoot.scale.x,
+      imagePoseSmoothingEnabled: !this.imagePoseSmoothingDisabled,
+      scaledWidth: pose.scaledWidth ?? null,
+      scaledHeight: pose.scaledHeight ?? null,
+      ...smoothing,
+      poseConfidence: null,
+      poseConfidenceAvailable: false,
+      poseConfidenceNote: 'XR8 image-target pose events do not expose a per-target confidence value.',
+    }, { bridge: true });
+  }
+
+  private seedPoseFilter(
+    position: THREE.Vector3,
+    quaternion: THREE.Quaternion,
+    scale: number,
+    productScale: number,
+    timestamp: number
+  ): void {
     this.filteredPositionVelocity.set(0, 0, 0);
     this.filteredAngularVelocity = 0;
     this.filteredScaleVelocity = 0;
-    this.storeRawPose(position, quaternion, scale, timestamp);
+    this.filteredProductScaleVelocity = 0;
+    this.storeRawPose(position, quaternion, scale, productScale, timestamp);
   }
 
-  private storeRawPose(position: THREE.Vector3, quaternion: THREE.Quaternion, scale: number, timestamp: number): void {
+  private storeRawPose(position: THREE.Vector3, quaternion: THREE.Quaternion, scale: number, productScale: number, timestamp: number): void {
     this.previousRawPosition.copy(position);
     this.previousRawQuaternion.copy(quaternion);
     this.previousRawScale = scale;
+    this.previousRawProductScale = productScale;
     this.lastPoseTimestamp = timestamp;
   }
 
@@ -1232,6 +1493,8 @@ export class ImageTrackingController {
     this.filteredAngularVelocity = 0;
     this.previousRawScale = 1;
     this.filteredScaleVelocity = 0;
+    this.previousRawProductScale = 1;
+    this.filteredProductScaleVelocity = 0;
   }
 
   private transitionTo(next: TrackingState, reason: string): void {
@@ -1342,6 +1605,7 @@ export class ImageTrackingController {
       const distance = position.distanceTo(this.lastCameraSample.position);
       const rotation = quaternion.angleTo(this.lastCameraSample.quaternion);
       if (distance > 0.35 || rotation > THREE.MathUtils.degToRad(35)) {
+        this.cameraPoseDiscontinuityAt = now;
         this.cameraPoseStableAfter = Math.max(
           this.cameraPoseStableAfter,
           now + ImageTrackingController.STABLE_DURATION_MS

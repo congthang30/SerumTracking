@@ -27,10 +27,10 @@ export class SerumModelLoader {
     onProgress?: (percent: number) => void
   ): Promise<LoadedSerumModel> {
     const urls = [
-      'assets/models/serum_story_animated.glb?v=10',
-      '/assets/models/serum_story_animated.glb?v=10',
-      'assets/models/serum_story_animated_opt.glb?v=9',
-      '/assets/models/serum_story_animated_opt.glb?v=9',
+      'assets/models/serum_story_animated.glb?v=12',
+      '/assets/models/serum_story_animated.glb?v=12',
+      'assets/models/serum_story_animated_opt.glb?v=11',
+      '/assets/models/serum_story_animated_opt.glb?v=11',
     ];
     let lastError: any = null;
 
@@ -150,14 +150,12 @@ export class SerumModelLoader {
               const action = mixer.clipAction(masterClip);
               action.setLoop(THREE.LoopOnce, 1);
               action.clampWhenFinished = true;
-              action.play();
               actions.push(action);
             } else {
               for (const anim of gltf.animations) {
                 const action = mixer.clipAction(anim);
                 action.setLoop(THREE.LoopOnce, 1);
                 action.clampWhenFinished = true;
-                action.play();
                 actions.push(action);
               }
             }
