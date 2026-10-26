@@ -40,10 +40,12 @@ export interface StoryProgress {
 export class ProductStoryTimeline {
   private targetGroup: THREE.Group; // userRotationGroup / ProductRoot
   private bottleGroup: THREE.Object3D;
+  private flowerGroup?: THREE.Object3D | null;
 
-  // Initial transforms of bottleGroup to guarantee ZERO drift
+  // Initial transforms of bottleGroup and flowerGroup to guarantee ZERO drift
   private initialBottlePos = new THREE.Vector3();
   private initialBottleRotY = 0;
+  private initialFlowerRotY = 0;
 
   // Animation timeline state
   private sequenceTime = 0;
@@ -62,13 +64,18 @@ export class ProductStoryTimeline {
 
   constructor(
     targetGroup: THREE.Group,
-    bottleGroup: THREE.Object3D
+    bottleGroup: THREE.Object3D,
+    flowerGroup?: THREE.Object3D | null
   ) {
     this.targetGroup = targetGroup;
     this.bottleGroup = bottleGroup;
+    this.flowerGroup = flowerGroup ?? null;
 
     this.initialBottlePos.copy(bottleGroup.position);
     this.initialBottleRotY = bottleGroup.rotation.y;
+    if (this.flowerGroup) {
+      this.initialFlowerRotY = this.flowerGroup.rotation.y;
+    }
 
     this.reset();
   }
@@ -94,6 +101,9 @@ export class ProductStoryTimeline {
     this.bottleGroup.position.copy(this.initialBottlePos);
     this.bottleGroup.rotation.y = this.initialBottleRotY;
     this.bottleGroup.rotation.z = 0;
+    if (this.flowerGroup) {
+      this.flowerGroup.rotation.y = this.initialFlowerRotY;
+    }
 
     // Reset scene scale & rotation
     this.targetGroup.scale.setScalar(this.baseScale * 0.85);
@@ -133,6 +143,7 @@ export class ProductStoryTimeline {
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.y = this.initialBottleRotY;
       this.bottleGroup.rotation.z = 0;
+      if (this.flowerGroup) this.flowerGroup.rotation.y = this.initialFlowerRotY;
     }
     // --- PHASE 2: 0.83s – 6.80s (Storyboard Scene 02 & 03: Water Emergence & 5.6s Spiral Swirl) ---
     else if (t < 6.80) {
@@ -144,6 +155,7 @@ export class ProductStoryTimeline {
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
       this.bottleGroup.rotation.y = this.initialBottleRotY;
+      if (this.flowerGroup) this.flowerGroup.rotation.y = this.initialFlowerRotY;
     }
     // --- PHASE 3: 6.80s – 7.53s (Storyboard Scene 04: Dynamic Splash Burst) ---
     else if (t < 7.53) {
@@ -153,6 +165,7 @@ export class ProductStoryTimeline {
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
       this.bottleGroup.rotation.y = this.initialBottleRotY;
+      if (this.flowerGroup) this.flowerGroup.rotation.y = this.initialFlowerRotY;
     }
     // --- PHASE 4: 7.53s – 9.10s (Storyboard Scene 05 & 06: Rock Pedestal Emergence & Flower Blooming) ---
     else if (t < 9.10) {
@@ -160,16 +173,18 @@ export class ProductStoryTimeline {
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
       this.bottleGroup.rotation.y = this.initialBottleRotY;
+      if (this.flowerGroup) this.flowerGroup.rotation.y = this.initialFlowerRotY;
     }
     // --- PHASE 5 & 6: 9.10s ONWARD (Scene 06B: Full Bloom Hold, Ingredients & Interactive 360) ---
     else {
-      // Bottle firmly seated on rock pedestal in full botanical bloom
+      // Bottle firmly seated in full botanical bloom
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
-      this.bottleGroup.rotation.y = this.initialBottleRotY;
 
       if (t < 10.07) {
         phase = 'PHASE_5_INGREDIENTS';
+        this.bottleGroup.rotation.y = this.initialBottleRotY;
+        if (this.flowerGroup) this.flowerGroup.rotation.y = this.initialFlowerRotY;
         this.targetGroup.rotation.y = 0;
       } else {
         phase = 'PHASE_6_INTERACTIVE_360';
@@ -178,8 +193,14 @@ export class ProductStoryTimeline {
         if (!isInteracting) {
           this.autoRotateAngle -= this.autoRotateSpeed * dt;
         }
-        // Entire model (bottle, flowers, pedestal, badges, sparkles) rotates evenly
-        this.targetGroup.rotation.y = this.autoRotateAngle + this.userBottleRotY;
+        const rotY = this.autoRotateAngle + this.userBottleRotY;
+        // Rock pedestal and 3 ingredients stay completely still (targetGroup.rotation.y = 0)!
+        // Only bottle and flowers rotate together smoothly!
+        this.bottleGroup.rotation.y = this.initialBottleRotY + rotY;
+        if (this.flowerGroup) {
+          this.flowerGroup.rotation.y = this.initialFlowerRotY + rotY;
+        }
+        this.targetGroup.rotation.y = 0;
       }
 
       // Product group stays firmly anchored

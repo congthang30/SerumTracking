@@ -204,7 +204,8 @@ export function useAREngine(): UseAREngineReturn {
       // 3. Initialize the baked GLB timeline; the old procedural hydration FX is unused.
       timelineRef.current = new ProductStoryTimeline(
         serumScene.userRotationGroup,
-        loadedModel.bottleGroup
+        loadedModel.bottleGroup,
+        loadedModel.flowerGroup
       );
 
       trackingRef.current = new ImageTrackingController(
@@ -398,7 +399,7 @@ export function useAREngine(): UseAREngineReturn {
       if (story && story.sequenceTime >= INTRO_DURATION) {
         const period = 2.6; // 2.6s natural rhythmic petal sway
         const progress = 0.5 * (1 - Math.cos((story.sequenceTime - INTRO_DURATION) * (2 * Math.PI / period)));
-        const targetTime = 10.07 - progress * 0.95; // 9.12s <-> 10.07s
+        const targetTime = 10.07 - progress * 0.28; // 9.79s <-> 10.07s (holding full bloom with gentle sway)
         for (const action of modelRef.current.actions ?? []) {
           action.paused = false;
           action.time = targetTime;

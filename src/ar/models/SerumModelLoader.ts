@@ -26,10 +26,10 @@ export class SerumModelLoader {
     onProgress?: (percent: number) => void
   ): Promise<LoadedSerumModel> {
     const urls = [
-      'assets/models/serum_story_animated.glb?v=34',
-      '/assets/models/serum_story_animated.glb?v=34',
-      'assets/models/serum_story_animated_opt.glb?v=34',
-      '/assets/models/serum_story_animated_opt.glb?v=34',
+      'assets/models/serum_story_animated.glb?v=35',
+      '/assets/models/serum_story_animated.glb?v=35',
+      'assets/models/serum_story_animated_opt.glb?v=35',
+      '/assets/models/serum_story_animated_opt.glb?v=35',
     ];
     let lastError: any = null;
 
