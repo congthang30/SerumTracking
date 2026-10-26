@@ -1088,20 +1088,20 @@ export class ImageTrackingController {
 
     if (aspect < 1.0) {
       // Mobile portrait mode:
-      // Scale dynamically tuned so side badges (HA and Vitamin C) have ~15-20% breathing margin
+      // Scale dynamically tuned so side badges (HA and Vitamin C) have comfortable margin as the model rotates
       const baseScale = 0.76;
       const scaleMultiplier = Math.min(1.0, Math.max(0.85, aspect / 0.52));
       const s = baseScale * scaleMultiplier;
 
-      // Position: x=0 (exact horizontal center), y=-0.14 (bottle center at screen center), z=-1.10 (comfortable distance)
-      outPos.set(0, -0.14 * (s / 0.76), -1.10);
+      // Position: x=0 (exact horizontal center), y=-0.16 (bottle center at screen center with 1.25x model size), z=-1.14
+      outPos.set(0, -0.16 * (s / 0.76), -1.14);
       // Down-pitch angle (~6.4°) matching luxury commercial hero view
       outQuat.setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(6.4), 0, 0, 'YXZ')).normalize();
       outScale.set(s, s, s);
     } else {
       // Landscape mode (desktop simulation / tablet landscape):
       const s = 0.95;
-      outPos.set(0, -0.16, -1.05);
+      outPos.set(0, -0.18, -1.08);
       outQuat.setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(6.4), 0, 0, 'YXZ')).normalize();
       outScale.set(s, s, s);
     }

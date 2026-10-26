@@ -56,6 +56,10 @@ export class ProductStoryTimeline {
   // User interactive 360 rotation angle
   public userBottleRotY = 0;
 
+  // Continuous auto-rotation from right to left (~18.3 deg/sec luxury turntable showcase speed)
+  public autoRotateSpeed = 0.32;
+  public autoRotateAngle = 0;
+
   constructor(
     targetGroup: THREE.Group,
     bottleGroup: THREE.Object3D
@@ -84,19 +88,20 @@ export class ProductStoryTimeline {
     this.isStarted = false;
     this.hasCompletedInitialReveal = false;
     this.userBottleRotY = 0;
+    this.autoRotateAngle = 0;
 
     // Reset bottle to exact resting position
     this.bottleGroup.position.copy(this.initialBottlePos);
     this.bottleGroup.rotation.y = this.initialBottleRotY;
     this.bottleGroup.rotation.z = 0;
 
-    // Reset scene scale
+    // Reset scene scale & rotation
     this.targetGroup.scale.setScalar(this.baseScale * 0.85);
     this.targetGroup.position.set(0, 0, 0);
-
+    this.targetGroup.rotation.y = 0;
   }
 
-  public update(dt: number): StoryProgress {
+  public update(dt: number, isInteracting = false): StoryProgress {
     if (!this.isStarted) {
       return {
         sequenceTime: 0,
@@ -161,15 +166,20 @@ export class ProductStoryTimeline {
       // Bottle firmly seated on rock pedestal in full botanical bloom
       this.bottleGroup.position.copy(this.initialBottlePos);
       this.bottleGroup.rotation.z = 0;
+      this.bottleGroup.rotation.y = this.initialBottleRotY;
 
-      if (t < 11.50) {
+      if (t < 10.07) {
         phase = 'PHASE_5_INGREDIENTS';
-        this.bottleGroup.rotation.y = this.initialBottleRotY;
+        this.targetGroup.rotation.y = 0;
       } else {
         phase = 'PHASE_6_INTERACTIVE_360';
         is360Active = true;
-        // User interactive swipe rotation applied directly to bottle
-        this.bottleGroup.rotation.y = this.initialBottleRotY + this.userBottleRotY;
+        // Continuous steady turntable auto-rotation from right to left (-Y rotation)
+        if (!isInteracting) {
+          this.autoRotateAngle -= this.autoRotateSpeed * dt;
+        }
+        // Entire model (bottle, flowers, pedestal, badges, sparkles) rotates evenly
+        this.targetGroup.rotation.y = this.autoRotateAngle + this.userBottleRotY;
       }
 
       // Product group stays firmly anchored

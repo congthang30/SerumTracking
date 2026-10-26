@@ -569,8 +569,13 @@ export class SerumModelLoader {
           const whiteTextMat = makeBeveledTextMaterial(0xffffff, 0x9a4a06);
           const haTextMat = makeBeveledTextMaterial(0xf8fdff, 0x0369a1);
 
-          // Real Crystal Bottle Glass Shader (Ultra-clear interior, crisp Fresnel glass wall rim & studio softbox reflections)
-          const makeCrystalBottleGlassMaterial = (rimStrength: number, specStrength: number) =>
+          // Luxury Frosted Cosmetic Glass Shader (Soft cloudy translucent glass body + thick rim curvature + crisp studio softbox reflections)
+          const makeCrystalBottleGlassMaterial = (
+            rimStrength: number,
+            specStrength: number,
+            frostedBaseOpacity: number = 0.24,
+            frostedEdgeOpacity: number = 0.65
+          ) =>
             new THREE.ShaderMaterial({
               transparent: true,
               depthWrite: false,
@@ -579,6 +584,8 @@ export class SerumModelLoader {
               uniforms: {
                 uRimStrength: { value: rimStrength },
                 uSpecStrength: { value: specStrength },
+                uFrostedBase: { value: frostedBaseOpacity },
+                uFrostedEdge: { value: frostedEdgeOpacity },
               },
               vertexShader: `
                 varying vec3 vNormalV;
@@ -593,41 +600,50 @@ export class SerumModelLoader {
               fragmentShader: `
                 uniform float uRimStrength;
                 uniform float uSpecStrength;
+                uniform float uFrostedBase;
+                uniform float uFrostedEdge;
                 varying vec3 vNormalV;
                 varying vec3 vViewDirV;
                 void main() {
                   vec3 N = normalize(vNormalV);
                   vec3 V = normalize(vViewDirV);
-                  float ndotv = abs(dot(N, V));
+                  float ndotv = clamp(abs(dot(N, V)), 0.0, 1.0);
                   float fresnel = 1.0 - ndotv;
 
-                  // Keep face-on glass 99% crystal clear so the serum, pipette & stone base show through cleanly without milky fog
-                  float rimBand = smoothstep(0.54, 0.96, fresnel) * pow(fresnel, 2.6);
-                  float rimEdge = smoothstep(0.82, 0.992, fresnel);
+                  // 1. Frosted Glass Body Density (Thành thủy tinh mờ đục nhẹ tự nhiên)
+                  float thickness = pow(fresnel, 1.4);
+                  float frostedOpacity = mix(uFrostedBase, uFrostedEdge, thickness);
 
-                  // Crisp vertical studio softbox reflections along cylinder curve & rounded shoulder
+                  // 2. Thick Glass Wall Rim & Shoulder Glaze
+                  float rimBand = smoothstep(0.48, 0.95, fresnel) * pow(fresnel, 2.2);
+                  float rimEdge = smoothstep(0.78, 0.995, fresnel);
+
+                  // 3. Crisp vertical studio softbox light reflections (bề mặt thủy tinh bóng bẩy)
                   vec3 light1 = normalize(vec3(-0.56, 0.42, 0.71));
                   vec3 light2 = normalize(vec3(0.62, 0.28, 0.73));
                   vec3 light3 = normalize(vec3(0.0, 0.86, 0.51));
                   float spec1 = pow(max(dot(N, normalize(light1 + V)), 0.0), 96.0) * 0.95;
-                  float spec1Soft = pow(max(dot(N, normalize(light1 + V)), 0.0), 26.0) * 0.16;
-                  float spec2 = pow(max(dot(N, normalize(light2 + V)), 0.0), 72.0) * 0.52;
-                  float spec3 = pow(max(dot(N, normalize(light3 + V)), 0.0), 54.0) * 0.42;
+                  float spec1Soft = pow(max(dot(N, normalize(light1 + V)), 0.0), 22.0) * 0.24;
+                  float spec2 = pow(max(dot(N, normalize(light2 + V)), 0.0), 72.0) * 0.55;
+                  float spec3 = pow(max(dot(N, normalize(light3 + V)), 0.0), 54.0) * 0.45;
                   float specTotal = (spec1 + spec1Soft + spec2 + spec3) * uSpecStrength;
 
-                  vec3 glassTint = vec3(0.97, 0.985, 1.0);
-                  vec3 warmRim = vec3(1.0, 0.96, 0.96);
-                  vec3 col = mix(glassTint, warmRim, smoothstep(0.45, 0.90, fresnel));
-                  col = mix(col, vec3(1.0, 1.0, 1.0), clamp(rimEdge * 0.85 + specTotal, 0.0, 1.0));
+                  // 4. Luxury White Flint Frosted Glass Tint with subtle warm champagne highlight
+                  vec3 glassBase = vec3(0.95, 0.965, 0.985);
+                  vec3 glassRim = vec3(1.0, 0.98, 0.95);
+                  float diffuse = max(dot(N, light1), 0.0) * 0.12 + 0.88;
+                  vec3 col = mix(glassBase, glassRim, smoothstep(0.40, 0.92, fresnel)) * diffuse;
+                  col += vec3(1.0, 1.0, 1.0) * (specTotal + rimEdge * 0.35 * uRimStrength);
 
-                  float alpha = clamp(0.008 + (rimBand * 0.32 + rimEdge * 0.26) * uRimStrength + specTotal * 0.85, 0.0, 0.92);
-                  gl_FragColor = vec4(col, alpha);
+                  // 5. Final Opacity: cloudy frosted veil in center + denser glass at edges + bright specular glints
+                  float alpha = clamp(frostedOpacity + (rimBand * 0.28 + rimEdge * 0.32) * uRimStrength + specTotal * 0.75, 0.0, 0.92);
+                  gl_FragColor = vec4(clamp(col, 0.0, 1.0), alpha);
                 }
               `,
             });
 
-          const bottleGlassMat = makeCrystalBottleGlassMaterial(1.0, 1.05);
-          const pipetteGlassMat = makeCrystalBottleGlassMaterial(1.25, 1.0);
+          const bottleGlassMat = makeCrystalBottleGlassMaterial(1.15, 1.10, 0.24, 0.65);
+          const pipetteGlassMat = makeCrystalBottleGlassMaterial(1.25, 1.0, 0.08, 0.35);
 
           // Warm Nude-Blush Peach-Pink Serum Shader with Pearlescent Diamond Micro-Shimmer
           const serumLiquidMat = new THREE.ShaderMaterial({
@@ -998,7 +1014,7 @@ export class SerumModelLoader {
           rawBox.getSize(rawSize);
 
           const maxDim = Math.max(rawSize.x, rawSize.y, rawSize.z) || 1;
-          const targetSize = 0.58;
+          const targetSize = 0.725; // Scaled up 1.25x (from 0.58) for hero presentation
           const scale = targetSize / maxDim;
           const normalizedSize = rawSize.clone().multiplyScalar(scale);
 

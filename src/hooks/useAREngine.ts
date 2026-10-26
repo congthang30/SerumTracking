@@ -357,7 +357,7 @@ export function useAREngine(): UseAREngineReturn {
     const safeDt = dt > 0.0001 && dt < 0.2 ? dt : 0.016;
 
     // 1. Update Master 6-Phase Story Timeline (1.0x original dynamic speed)
-    const story = timelineRef.current?.update(safeDt);
+    const story = timelineRef.current?.update(safeDt, isPointerDownRef.current);
     if (scene?.userRotationGroup) {
       worldTrackingDebugger.recordTransformWrite(
         'MODEL',
