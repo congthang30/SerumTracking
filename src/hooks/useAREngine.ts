@@ -641,6 +641,7 @@ export function useAREngine(): UseAREngineReturn {
 
     const onResize = () => {
       sceneRef.current?.handleResize();
+      trackingRef.current?.handleResize();
     };
     window.addEventListener('resize', onResize);
 

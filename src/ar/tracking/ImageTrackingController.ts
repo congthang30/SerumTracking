@@ -36,6 +36,15 @@ export class ImageTrackingController {
   private hasPose = false;
   private isTracked = false;
   private isCameraLocked = false;
+  private isCentering = false;
+  private centerStartTime = 0;
+  private centerDurationMs = 400;
+  private readonly centerStartPos = new THREE.Vector3();
+  private readonly centerStartQuat = new THREE.Quaternion();
+  private readonly centerStartScale = new THREE.Vector3();
+  private readonly targetCenterPos = new THREE.Vector3();
+  private readonly targetCenterQuat = new THREE.Quaternion();
+  private readonly targetCenterScale = new THREE.Vector3();
   private worldTrackingNormal = false;
   private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
   private worldTrackingReason = 'INITIALIZING';
@@ -314,7 +323,26 @@ export class ImageTrackingController {
    */
   public inspectWorldAnchor(): void {
     if (this.isCameraLocked) {
-      // In Camera-Locked mode, ProductRoot is attached to AR Camera; world anchor inspection is bypassed
+      if (this.isCentering) {
+        const elapsed = performance.now() - this.centerStartTime;
+        const t = Math.min(1, Math.max(0, elapsed / this.centerDurationMs));
+        // Cubic ease-out: smooth deceleration into dead center
+        const ease = 1 - Math.pow(1 - t, 3);
+
+        this.productRoot.position.lerpVectors(this.centerStartPos, this.targetCenterPos, ease);
+        this.productRoot.quaternion.slerpQuaternions(this.centerStartQuat, this.targetCenterQuat, ease);
+        this.productRoot.scale.lerpVectors(this.centerStartScale, this.targetCenterScale, ease);
+        this.productRoot.updateMatrix();
+
+        if (t >= 1) {
+          this.productRoot.position.copy(this.targetCenterPos);
+          this.productRoot.quaternion.copy(this.targetCenterQuat);
+          this.productRoot.scale.copy(this.targetCenterScale);
+          this.productRoot.updateMatrix();
+          this.isCentering = false;
+          logger.log('info', '[AR_ANCHOR] 🎯 Centering transition complete. Model is locked dead-center in screen.');
+        }
+      }
       return;
     }
     if (!this.isWorldAnchored || !this.expectedWorldMatrix) return;
@@ -996,6 +1024,17 @@ export class ImageTrackingController {
     this.hasPose = true;
     this.expectedWorldMatrix = capturedWorldMatrix;
 
+    // 7. Initialize smooth cubic-ease-out centering transition to dead center of camera view
+    this.centerStartPos.copy(this.productRoot.position);
+    this.centerStartQuat.copy(this.productRoot.quaternion).normalize();
+    this.centerStartScale.copy(this.productRoot.scale);
+
+    this.getOptimalCenterTransform(this.targetCenterPos, this.targetCenterQuat, this.targetCenterScale);
+
+    this.isCentering = true;
+    this.centerStartTime = performance.now();
+    this.centerDurationMs = 400;
+
     worldTrackingDebugger.recordTransformWrite(
       'MODEL',
       'CAMERA_LOCK_ATTACHED',
@@ -1032,6 +1071,68 @@ export class ImageTrackingController {
     );
 
     return true;
+  }
+
+  /**
+   * Computes device-aspect-aware target transform so the serum model and all 3
+   * active ingredient badges remain centered and fully visible within screen bounds.
+   */
+  public getOptimalCenterTransform(
+    outPos: THREE.Vector3,
+    outQuat: THREE.Quaternion,
+    outScale: THREE.Vector3
+  ): void {
+    const width = typeof window !== 'undefined' ? window.innerWidth : 390;
+    const height = typeof window !== 'undefined' ? window.innerHeight : 844;
+    const aspect = width / Math.max(1, height);
+
+    if (aspect < 1.0) {
+      // Mobile portrait mode:
+      // Scale dynamically tuned so side badges (HA and Vitamin C) have ~15-20% breathing margin
+      const baseScale = 0.76;
+      const scaleMultiplier = Math.min(1.0, Math.max(0.85, aspect / 0.52));
+      const s = baseScale * scaleMultiplier;
+
+      // Position: x=0 (exact horizontal center), y=-0.14 (bottle center at screen center), z=-1.10 (comfortable distance)
+      outPos.set(0, -0.14 * (s / 0.76), -1.10);
+      // Down-pitch angle (~6.4°) matching luxury commercial hero view
+      outQuat.setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(6.4), 0, 0, 'YXZ')).normalize();
+      outScale.set(s, s, s);
+    } else {
+      // Landscape mode (desktop simulation / tablet landscape):
+      const s = 0.95;
+      outPos.set(0, -0.16, -1.05);
+      outQuat.setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(6.4), 0, 0, 'YXZ')).normalize();
+      outScale.set(s, s, s);
+    }
+  }
+
+  /**
+   * Called on window resize / orientation change to keep the model centered and appropriately scaled.
+   */
+  public handleResize(): void {
+    if (!this.isCameraLocked || !this.camera) return;
+    this.getOptimalCenterTransform(this.targetCenterPos, this.targetCenterQuat, this.targetCenterScale);
+    if (!this.isCentering) {
+      this.productRoot.position.copy(this.targetCenterPos);
+      this.productRoot.quaternion.copy(this.targetCenterQuat);
+      this.productRoot.scale.copy(this.targetCenterScale);
+      this.productRoot.updateMatrix();
+    }
+  }
+
+  /**
+   * Immediately snaps to camera-locked centered state (useful for simulations and testing).
+   */
+  public lockToCameraAtCenter(): void {
+    if (this.detachIntoCamera()) {
+      this.getOptimalCenterTransform(this.targetCenterPos, this.targetCenterQuat, this.targetCenterScale);
+      this.productRoot.position.copy(this.targetCenterPos);
+      this.productRoot.quaternion.copy(this.targetCenterQuat);
+      this.productRoot.scale.copy(this.targetCenterScale);
+      this.productRoot.updateMatrix();
+      this.isCentering = false;
+    }
   }
 
   private detachIntoWorldAnchor(): boolean {
