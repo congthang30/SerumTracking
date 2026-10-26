@@ -35,6 +35,7 @@ export class ImageTrackingController {
   private hasSeenTarget = false;
   private hasPose = false;
   private isTracked = false;
+  private isCameraLocked = false;
   private worldTrackingNormal = false;
   private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
   private worldTrackingReason = 'INITIALIZING';
@@ -164,6 +165,10 @@ export class ImageTrackingController {
     return this.state === 'ANCHORED';
   }
 
+  public get isLockedToCamera(): boolean {
+    return this.isCameraLocked;
+  }
+
   public get trackingState(): TrackingState {
     return this.state;
   }
@@ -223,6 +228,7 @@ export class ImageTrackingController {
 
   /** Returns true only for the first image detection in this AR session. */
   public handleImageFound(pose: ImagePose, rotationDeg = 0): boolean {
+    if (this.isCameraLocked || this.state === 'ANCHORED') return false;
     if (this.ignoreImageEvent('imagefound')) return false;
     if (!this.isValidPose(pose)) {
       traceAR('IMAGE_FOUND_IGNORED', { reason: 'invalid pose' }, 'warn');
@@ -233,9 +239,8 @@ export class ImageTrackingController {
     const firstDetection = !this.hasSeenTarget;
     this.hasSeenTarget = true;
     this.isTracked = true;
-    this.transitionTo('STABILIZING', 'image target found');
     this.sampleCameraPose('imagefound');
-    this.applyPose(pose, rotationDeg, !this.hasPose);
+    this.applyPose(pose, rotationDeg, true);
     this.setTargetVisibility(true, 'image target found');
     this.resetStabilityWindow(pose);
     worldTrackingDebugger.recordEvent('TRACKING', 'IMAGE_TARGET_DETECTED', {
@@ -249,10 +254,15 @@ export class ImageTrackingController {
       productParent: this.productRoot.parent?.name || '(none)',
     }, { bridge: true });
     this.recordApproachDiagnostics();
+
+    // Image Tracking → Camera-Locked: Detach from Image Target and lock directly to AR Camera
+    this.detachIntoCamera();
+
     traceAR('IMAGE_FOUND', {
       target: pose.name,
       firstDetection,
       state: this.state,
+      isCameraLocked: this.isCameraLocked,
       worldTracking: `${this.worldTrackingStatus}/${this.worldTrackingReason}`,
       pose: this.poseDescription(pose),
       targetParent: this.targetGroup.parent?.name || '(none)',
@@ -263,54 +273,26 @@ export class ImageTrackingController {
     return firstDetection;
   }
 
-  /** Image poses control the model only while it is still stabilizing. */
+  /** Once camera-locked, image poses are completely ignored to avoid conflicts. */
   public handleImageUpdated(pose: ImagePose, rotationDeg = 0): boolean {
+    if (this.isCameraLocked || this.state === 'ANCHORED') return false;
     if (this.ignoreImageEvent('imageupdated')) return false;
-    if (this.state !== 'STABILIZING' || !this.isValidPose(pose)) return false;
+    if (!this.isValidPose(pose)) return false;
 
     this.isTracked = true;
     this.sampleCameraPose('imageupdated');
-    this.applyPose(pose, rotationDeg, false);
+    this.applyPose(pose, rotationDeg, true);
     this.setTargetVisibility(true, 'image target pose updated');
     this.onUpdated?.(pose);
-    this.imageUpdateCount += 1;
-    this.recordApproachDiagnostics();
-
-    const now = performance.now();
-    const poseStable = this.isPoseStable(pose, now);
-    const cameraPoseSettled = now >= this.cameraPoseStableAfter;
-    const blockedBy = !this.worldTrackingNormal
-      ? 'world tracking not ready'
-      : !cameraPoseSettled
-        ? 'camera pose settling after discontinuity'
-        : !poseStable
-          ? 'image pose not stable'
-          : '';
-    if (this.imageUpdateCount % 30 === 0) this.reportStabilityProgress(poseStable, blockedBy);
-    if (!poseStable || !this.worldTrackingNormal || !cameraPoseSettled) {
-      return false;
-    }
-    if (!this.isWorldCameraPoseValid()) {
-      this.logHandoffFailure('XR8 camera pose is not valid yet.');
-      if (this.imageUpdateCount % 30 === 0) this.reportStabilityProgress(poseStable, 'camera pose invalid');
-      return false;
-    }
-    if (this.lastHandoffReadyTraceAt === 0 || now - this.lastHandoffReadyTraceAt >= 1000) {
-      this.lastHandoffReadyTraceAt = now;
-      traceAR('HANDOFF_READY', {
-        imageUpdates: this.imageUpdateCount,
-        stableSamples: this.stableSamples,
-        stableMs: Math.round(now - this.stableSince),
-        worldTracking: `${this.worldTrackingStatus}/${this.worldTrackingReason}`,
-        cameraPoseSettled,
-        cameraPosition: this.cameraWorldPosition(),
-      });
-    }
-    return this.detachIntoWorldAnchor();
+    return this.detachIntoCamera();
   }
 
-  /** Poster loss never hides or resets the last visible model pose. */
+  /** Poster loss never hides or resets the model once locked to camera. */
   public handleImageLost(): void {
+    if (this.isCameraLocked || this.state === 'ANCHORED') {
+      // In Camera-Locked mode, the model stays locked to camera; poster loss has zero effect
+      return;
+    }
     if (this.ignoreImageEvent('imagelost')) return;
     if (!this.hasSeenTarget) return;
 
@@ -320,27 +302,9 @@ export class ImageTrackingController {
       worldTrackingStatus: this.worldTrackingStatus,
       worldTrackingReason: this.worldTrackingReason,
       productParent: this.productRoot.parent?.name || '(none)',
-      action: this.state === 'ANCHORED' ? 'retain world-locked pose' : 'retain last valid image pose',
+      action: 'retain last valid image pose',
     }, { bridge: true });
     this.recordApproachDiagnostics();
-    const stableElapsedMs = this.stableSince > 0 ? performance.now() - this.stableSince : 0;
-    traceAR('IMAGE_LOST', {
-      state: this.state,
-      worldTracking: `${this.worldTrackingStatus}/${this.worldTrackingReason}`,
-      stableSamples: `${this.stableSamples}/${ImageTrackingController.STABLE_SAMPLE_COUNT}`,
-      stableMs: Math.round(stableElapsedMs),
-      productParent: this.productRoot.parent?.name || '(none)',
-      productVisible: this.productRoot.visible,
-      targetVisible: this.targetGroup.visible,
-      action: this.state === 'ANCHORED' ? 'ignored after anchor' : 'retain last pose; wait for target reacquisition',
-    }, 'warn');
-    reportCameraDiagnostic(
-      'Anchor stabilization',
-      `paused: target lost; state=${this.state}; samples=${this.stableSamples}/${ImageTrackingController.STABLE_SAMPLE_COUNT}; world=${this.worldTrackingStatus}/${this.worldTrackingReason}`
-    );
-    this.resetStabilityWindow();
-    this.transitionTo('STABILIZING', 'image target lost; retaining last pose');
-    this.sampleCameraPose('imagelost');
     this.onLost?.();
   }
 
@@ -349,6 +313,10 @@ export class ImageTrackingController {
    * and world-matrix writes after handoff without changing the model.
    */
   public inspectWorldAnchor(): void {
+    if (this.isCameraLocked) {
+      // In Camera-Locked mode, ProductRoot is attached to AR Camera; world anchor inspection is bypassed
+      return;
+    }
     if (!this.isWorldAnchored || !this.expectedWorldMatrix) return;
 
     this.monitorAnchorCameraPose();
@@ -974,6 +942,98 @@ export class ImageTrackingController {
     return true;
   }
 
+  /**
+   * Image Tracking → Camera-Locked:
+   * Detaches ProductRoot from ImageTargetAnchor / WorldAnchor and attaches it
+   * directly to the AR Camera, fixing its relative transform in front of the camera.
+   * Completely stops any further tracking updates to eliminate jitter, drift, and conflicts.
+   */
+  public detachIntoCamera(): boolean {
+    if (this.isCameraLocked) return true;
+    if (!this.camera) {
+      logger.log('warn', '[AR_ANCHOR] Cannot lock to AR camera: camera reference is missing.');
+      return false;
+    }
+
+    const originalParent = this.productRoot.parent;
+    if (!originalParent) {
+      logger.log('warn', '[AR_ANCHOR] ProductRoot has no parent.');
+      return false;
+    }
+
+    // 1. Ensure camera is part of the scene graph so its children are traversed by WebGLRenderer
+    const scene = this.targetGroup.parent || (this.camera as any).parent;
+    if (scene && this.camera.parent !== scene) {
+      scene.add(this.camera);
+    }
+
+    // 2. Ensure all world matrices are fully up to date before reparenting
+    this.targetGroup.updateWorldMatrix(true, true);
+    this.productRoot.updateWorldMatrix(true, true);
+    this.camera.updateWorldMatrix(true, true);
+
+    const capturedWorldMatrix = this.productRoot.matrixWorld.clone();
+    const debugProductBefore = worldTrackingDebugger.captureTransform(this.productRoot);
+
+    // 3. Attach productRoot directly to the camera while maintaining its exact world transform
+    this.camera.attach(this.productRoot);
+
+    // 4. Update and verify matrix consistency
+    this.productRoot.updateMatrix();
+    this.productRoot.updateWorldMatrix(true, true);
+
+    const finalError = this.maxMatrixDifference(this.productRoot.matrixWorld, capturedWorldMatrix);
+
+    // 5. Hide old image target and world anchor groups; keep productRoot visible
+    this.targetGroup.visible = false;
+    this.worldAnchorGroup.visible = false;
+    this.productRoot.visible = true;
+
+    // 6. Set state to ANCHORED (Camera-Locked)
+    this.isCameraLocked = true;
+    this.state = 'ANCHORED';
+    this.isTracked = true;
+    this.hasPose = true;
+    this.expectedWorldMatrix = capturedWorldMatrix;
+
+    worldTrackingDebugger.recordTransformWrite(
+      'MODEL',
+      'CAMERA_LOCK_ATTACHED',
+      'ImageTrackingController.detachIntoCamera',
+      this.productRoot,
+      debugProductBefore,
+      'Attached ProductRoot directly to AR Camera while preserving its exact world transform.',
+      {
+        oldParent: originalParent.name || originalParent.type,
+        newParent: this.camera.name || this.camera.type,
+        localPosition: this.productRoot.position.toArray(),
+        localQuaternion: this.productRoot.quaternion.toArray(),
+        localScale: this.productRoot.scale.toArray(),
+        worldMatrixError: finalError,
+      }
+    );
+
+    traceAR('CAMERA_LOCK_ESTABLISHED', {
+      cameraPosition: this.cameraWorldPosition(),
+      productLocalPosition: this.vectorDescription(this.productRoot.position),
+      productLocalScale: this.vectorDescription(this.productRoot.scale),
+      worldMatrixError: finalError,
+      parent: this.productRoot.parent?.name || '(none)',
+    });
+
+    reportCameraDiagnostic(
+      'Camera-Locked AR',
+      `Locked to AR camera; pos=${this.vectorDescription(this.productRoot.position)}; scale=${this.vectorDescription(this.productRoot.scale)}; error=${finalError.toExponential(2)}`
+    );
+
+    logger.log(
+      'info',
+      `[AR_ANCHOR] 🔒 Image Tracking → Camera-Locked complete! Model is attached to AR camera; matrixError=${finalError.toExponential(2)}`
+    );
+
+    return true;
+  }
+
   private detachIntoWorldAnchor(): boolean {
     if (this.state === 'ANCHORED') return true;
     const originalParent = this.productRoot.parent;
@@ -1564,18 +1624,21 @@ export class ImageTrackingController {
   }
 
   private ignoreImageEvent(eventName: string): boolean {
-    if (this.state !== 'ANCHORED') return false;
-    if (!this.loggedIgnoredEvents.has(eventName)) {
-      this.loggedIgnoredEvents.add(eventName);
-      traceAR('IMAGE_EVENT_IGNORED_AFTER_ANCHOR', {
-        event: eventName,
-        state: this.state,
-        productParent: this.productRoot.parent?.name || '(none)',
-        worldTracking: `${this.worldTrackingStatus}/${this.worldTrackingReason}`,
-      });
-      logger.log('info', `[AR_ANCHOR] Ignoring ${eventName}; ProductRoot is detached from ImageTargetAnchor.`);
+    if (this.isCameraLocked || this.state === 'ANCHORED') {
+      if (!this.loggedIgnoredEvents.has(eventName)) {
+        this.loggedIgnoredEvents.add(eventName);
+        traceAR('IMAGE_EVENT_IGNORED_AFTER_ANCHOR', {
+          event: eventName,
+          state: this.state,
+          isCameraLocked: this.isCameraLocked,
+          productParent: this.productRoot.parent?.name || '(none)',
+          worldTracking: `${this.worldTrackingStatus}/${this.worldTrackingReason}`,
+        });
+        logger.log('info', `[AR_ANCHOR] Ignoring ${eventName}; ProductRoot is Camera-Locked to AR Camera.`);
+      }
+      return true;
     }
-    return true;
+    return false;
   }
 
   private logHandoffFailure(reason: string): void {

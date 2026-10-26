@@ -22,6 +22,7 @@ export class SerumScene {
     // Luxury cosmetic commercial angle: framed lower with generous clearance for full scene
     this.camera.position.set(0, 0.26, 0.98);
     this.camera.lookAt(0, 0.18, 0);
+    this.scene.add(this.camera);
 
     // Hierarchy matching 8th Wall anchor structure
     this.rootAnchor = new THREE.Group();
@@ -152,6 +153,10 @@ export class SerumScene {
     if ((xrCamera as THREE.PerspectiveCamera).isPerspectiveCamera) {
       this.camera = xrCamera as THREE.PerspectiveCamera;
     }
+    // Ensure AR Camera is added to the XR Scene so children attached to camera (Camera-Locked mode) are traversed & rendered
+    if (xrCamera && xrCamera.parent !== xrScene) {
+      xrScene.add(xrCamera);
+    }
     if (xrRenderer) {
       this.renderer = xrRenderer;
       xrRenderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -165,6 +170,9 @@ export class SerumScene {
 
   public attachToSimScene(): void {
     this.isAttachedToXRScene = false;
+    if (this.camera.parent !== this.scene) {
+      this.scene.add(this.camera);
+    }
     if (this.rootAnchor.parent !== this.scene) {
       this.scene.add(this.rootAnchor);
     }

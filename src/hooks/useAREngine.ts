@@ -301,6 +301,7 @@ export function useAREngine(): UseAREngineReturn {
         if (firstTargetFound) {
           startModelAnimation();
           timelineRef.current?.start();
+          manager.disableImageTargets();
         }
       },
       onTargetUpdated: (pose) => {
