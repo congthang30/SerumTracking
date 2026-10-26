@@ -26,10 +26,10 @@ export class SerumModelLoader {
     onProgress?: (percent: number) => void
   ): Promise<LoadedSerumModel> {
     const urls = [
-      'assets/models/serum_story_animated.glb?v=33',
-      '/assets/models/serum_story_animated.glb?v=33',
-      'assets/models/serum_story_animated_opt.glb?v=33',
-      '/assets/models/serum_story_animated_opt.glb?v=33',
+      'assets/models/serum_story_animated.glb?v=34',
+      '/assets/models/serum_story_animated.glb?v=34',
+      'assets/models/serum_story_animated_opt.glb?v=34',
+      '/assets/models/serum_story_animated_opt.glb?v=34',
     ];
     let lastError: any = null;
 
@@ -727,7 +727,7 @@ export class SerumModelLoader {
           };
 
           const texLoader = new THREE.TextureLoader();
-          const stoneTexture = texLoader.load('/assets/textures/stone_texture_v5.png');
+          const stoneTexture = texLoader.load('/assets/textures/stone_texture_v6.png');
           configureSharpTexture(stoneTexture, true);
 
           const flowerTexture = texLoader.load('/assets/textures/texture_flow_v2.png');
@@ -863,8 +863,8 @@ export class SerumModelLoader {
                 const stoneMat = (mesh.material as THREE.MeshStandardMaterial).clone();
                 stoneMat.map = stoneTexture;
                 stoneMat.color.setHex(0xffffff);
-                stoneMat.roughness = 0.72;
-                stoneMat.metalness = 0.0;
+                stoneMat.roughness = 0.42;
+                stoneMat.metalness = 0.05;
                 stoneMat.normalMap = null;
                 stoneMat.roughnessMap = null;
                 stoneMat.metalnessMap = null;
