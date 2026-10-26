@@ -4,8 +4,6 @@ import { Ingredient } from '../types/ar';
 import { SerumScene } from '../ar/scene/SerumScene';
 import { SerumModelLoader, LoadedSerumModel } from '../ar/models/SerumModelLoader';
 import { ProductStoryTimeline, StoryPhase } from '../ar/animation/ProductStoryTimeline';
-import { CalloutProjection } from '../ar/callouts/CalloutProjection';
-import { Callout3DBadges } from '../ar/callouts/Callout3DBadges';
 import { ImageTrackingController } from '../ar/tracking/ImageTrackingController';
 import { EightWallManager } from '../ar/engine/EightWallManager';
 import { beginARTraceSession, traceAR } from '../ar/xr/camera-fix';
@@ -77,8 +75,6 @@ export function useAREngine(): UseAREngineReturn {
   const modelRef = useRef<LoadedSerumModel | null>(null);
   const timelineRef = useRef<ProductStoryTimeline | null>(null);
   const trackingRef = useRef<ImageTrackingController | null>(null);
-  const calloutProjRef = useRef<CalloutProjection | null>(null);
-  const calloutBadgesRef = useRef<Callout3DBadges | null>(null);
   const eightWallRef = useRef<EightWallManager | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const clockRef = useRef(new THREE.Clock());
@@ -215,13 +211,6 @@ export function useAREngine(): UseAREngineReturn {
         loadedModel.modelScene,
         canvas
       );
-      calloutProjRef.current = new CalloutProjection(serumScene.camera);
-      calloutBadgesRef.current = new Callout3DBadges(
-        loadedModel.bottleGroup,
-        serumScene.camera,
-        canvas,
-        (ing) => openIngredientModal(ing)
-      );
 
       // 4. Handle Simulation Mode vs Real 8th Wall AR
       if (isSimulation) {
@@ -301,8 +290,6 @@ export function useAREngine(): UseAREngineReturn {
           modelRoot: modelRef.current?.modelScene ?? null,
         });
         if (renderer) arPerformanceMonitor.attachRenderer(renderer, runtimeVersion);
-        calloutProjRef.current?.updateCamera(camera);
-        calloutBadgesRef.current?.updateCamera(camera);
       },
       onTargetFound: (pose) => {
         const firstTargetFound = trackingRef.current?.handleImageFound(pose, 0) ?? false;
@@ -414,6 +401,27 @@ export function useAREngine(): UseAREngineReturn {
       } else {
         modelRef.current.mixer.update(safeDt);
       }
+
+      // Lively continuous floating bounce ("nhún nhún") for the 3 ingredient molecules once revealed
+      if (story && story.sequenceTime >= 8.95) {
+        const src = modelRef.current.sourceScene;
+        const floatTime = story.sequenceTime - 8.95;
+        const ramp = Math.min(1, floatTime / 0.55);
+        const molConfigs: [string, number, number, number][] = [
+          ['B5_Controller', 1.05, 0.0, 2.85],
+          ['HA_Controller', 0.46, 2.1, 2.65],
+          ['VC_Controller', 0.82, 4.2, 3.05],
+        ];
+        for (const [ctrlName, baseY, phase, freq] of molConfigs) {
+          const ctrl = src.getObjectByName(ctrlName);
+          if (ctrl && ctrl.scale.x > 0.25) {
+            const bounce = Math.sin(floatTime * freq + phase) * 0.068 * ramp;
+            const pulse = 1.0 + Math.sin(floatTime * (freq * 1.35) + phase) * 0.038 * ramp;
+            ctrl.position.y = baseY + bounce;
+            ctrl.scale.setScalar(pulse);
+          }
+        }
+      }
       worldTrackingDebugger.recordTransformWrite(
         'MODEL',
         'MODEL_ANIMATION_TRANSFORM',
@@ -455,12 +463,7 @@ export function useAREngine(): UseAREngineReturn {
       userRotVelRef.current *= 0.92;
     }
 
-    // 4. Update 3D Callout Badges locked to GLB 3D lines
-    if (story) {
-      calloutBadgesRef.current?.update(story.sequenceTime);
-    }
-
-    // 6. Render 3D Scene (if in simulation mode or fallback)
+    // 4. Render 3D Scene (if in simulation mode or fallback)
     if (driveRender && sceneRef.current) {
       sceneRef.current.render();
     }
@@ -499,10 +502,6 @@ export function useAREngine(): UseAREngineReturn {
 
     const onResize = () => {
       sceneRef.current?.handleResize();
-      if (sceneRef.current?.camera) {
-        calloutProjRef.current?.updateCamera(sceneRef.current.camera);
-        calloutBadgesRef.current?.updateCamera(sceneRef.current.camera);
-      }
     };
     window.addEventListener('resize', onResize);
 

@@ -35,12 +35,21 @@ export function traceAR(
   // Disabled in the shipped experience.
 }
 
-function parseCameraInfo(d: MediaDeviceInfo): CameraInfo {
-  const l = (d.label || '').toLowerCase();
-  const isFront = /front|user|truoc|selfie/.test(l);
+function normalizeCameraLabel(raw: string): string {
+  return (raw || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .trim();
+}
+
+function parseCameraInfo(d: Pick<MediaDeviceInfo, 'deviceId' | 'label' | 'kind'>): CameraInfo {
+  const l = normalizeCameraLabel(d.label || '');
+  const isFront = /front|user|truoc|selfie|facetime/.test(l);
   const isTele = /telephoto|tele|zoom|chup xa/.test(l);
-  const isUltra = /ultra|0\.5|sieu rong/.test(l);
-  const isBack = !isFront && (/back|sau|rear|wide|triple|dual|main|camera/.test(l) || l === '');
+  const isUltra = /ultra|0\.5|sieu rong|macro/.test(l);
+  const isBack = !isFront && (/back|sau|rear|wide|triple|dual|main|camera|environment/.test(l) || l === '');
   const isWide = isBack && !isTele && !isUltra;
   return {
     deviceId: d.deviceId,
@@ -58,21 +67,35 @@ export function findBestWideCamera(devices: MediaDeviceInfo[]): MediaDeviceInfo 
   if (videoDevs.length === 0) return null;
   if (videoDevs.length === 1) return videoDevs[0];
 
-  // 1. Back camera with label containing 'wide', 'main', 'triple', 'dual' and NOT tele/ultra
+  // 1. Prefer dedicated 1x Main Wide camera ("Back Camera" / "Camera mặt sau" / "Back Wide Camera")
+  // which has continuous autofocus from ~15cm to infinity without macro-lock blur at >20cm
+  const primarySingleWide = videoDevs.find((d) => {
+    const info = parseCameraInfo(d);
+    const norm = normalizeCameraLabel(d.label);
+    return (
+      info.isWide &&
+      (/^(back camera|camera mat sau|back wide camera|camera goc rong mat sau|rear camera)$/.test(norm) ||
+        (/wide|main|chinh/.test(norm) && !/dual|triple|kep|ba/.test(norm)))
+    );
+  });
+  if (primarySingleWide) return primarySingleWide;
+
+  // 2. Back camera with label containing 'wide', 'main', 'triple', 'dual' and NOT tele/ultra
   const wideBack = videoDevs.find((d) => {
     const info = parseCameraInfo(d);
-    return info.isWide && /wide|triple|dual|main|chinh/i.test(d.label);
+    const norm = normalizeCameraLabel(d.label);
+    return info.isWide && /wide|triple|dual|main|chinh|ba|kep/.test(norm);
   });
   if (wideBack) return wideBack;
 
-  // 2. Any back camera that is not tele/ultra
+  // 3. Any back camera that is not tele/ultra
   const nonTeleBack = videoDevs.find((d) => {
     const info = parseCameraInfo(d);
     return info.isBack && !info.isTele && !info.isUltra && d.label.length > 0;
   });
   if (nonTeleBack) return nonTeleBack;
 
-  // 3. Fallback: first back camera
+  // 4. Fallback: first back camera
   const anyBack = videoDevs.find((d) => parseCameraInfo(d).isBack);
   if (anyBack) return anyBack;
 
@@ -80,21 +103,52 @@ export function findBestWideCamera(devices: MediaDeviceInfo[]): MediaDeviceInfo 
 }
 
 async function requestContinuousFocus(track: MediaStreamTrack, capabilities: any): Promise<string> {
-  const supported = (navigator.mediaDevices.getSupportedConstraints?.() as any)?.focusMode;
+  const supportedConstraints = (navigator.mediaDevices.getSupportedConstraints?.() as any) ?? {};
   const modes = capabilities?.focusMode;
-  if (!supported || !Array.isArray(modes) || !modes.includes('continuous')) {
-    return 'not supported; browser default';
-  }
-
-  const activeMode = (track.getSettings() as any).focusMode;
-  if (activeMode === 'continuous') return 'continuous already active';
+  const canSetFocus = Boolean(
+    supportedConstraints.focusMode || (Array.isArray(modes) && modes.includes('continuous'))
+  );
 
   const currentConstraints = track.getConstraints();
   const advanced = [...(currentConstraints.advanced ?? [])] as any[];
-  advanced.push({ focusMode: 'continuous' });
+  const extraAdvanced: Record<string, any> = {};
+
+  if (canSetFocus) {
+    extraAdvanced.focusMode = 'continuous';
+  }
+  if (Array.isArray(capabilities?.exposureMode) && capabilities.exposureMode.includes('continuous')) {
+    extraAdvanced.exposureMode = 'continuous';
+  }
+  if (Array.isArray(capabilities?.whiteBalanceMode) && capabilities.whiteBalanceMode.includes('continuous')) {
+    extraAdvanced.whiteBalanceMode = 'continuous';
+  }
+
+  if (Object.keys(extraAdvanced).length === 0) {
+    return 'not supported; browser default';
+  }
+
+  advanced.push(extraAdvanced);
   await (track as any).applyConstraints({ ...currentConstraints, advanced });
 
-  return String((track.getSettings() as any).focusMode ?? 'continuous requested; mode not exposed');
+  return String((track.getSettings() as any).focusMode ?? 'continuous requested');
+}
+
+function enhanceVideoConstraints(videoConstraint: boolean | MediaTrackConstraints): MediaTrackConstraints {
+  if (videoConstraint === true || typeof videoConstraint !== 'object' || videoConstraint === null) {
+    return {
+      facingMode: { ideal: 'environment' },
+      width: { min: 960, ideal: 1920 },
+      height: { min: 720, ideal: 1440 },
+    };
+  }
+  const enhanced: Record<string, any> = { ...videoConstraint };
+  if (typeof enhanced.width === 'object' && enhanced.width !== null && !('exact' in enhanced.width)) {
+    enhanced.width = { ...enhanced.width, ideal: Math.max(enhanced.width.min ?? 960, 1920) };
+  }
+  if (typeof enhanced.height === 'object' && enhanced.height !== null && !('exact' in enhanced.height)) {
+    enhanced.height = { ...enhanced.height, ideal: Math.max(enhanced.height.min ?? 720, 1440) };
+  }
+  return enhanced as MediaTrackConstraints;
 }
 
 export function installCameraFix(): void {
@@ -119,15 +173,25 @@ export function installCameraFix(): void {
       return origGetUserMedia(constraints);
     }
 
+    const enhancedVideo = enhanceVideoConstraints(constraints.video);
+
     let stream: MediaStream;
     try {
-      stream = await origGetUserMedia(constraints);
-    } catch (err: any) {
-      logger.log('warn', '[CAMERA_FIX] Initial getUserMedia failed, retrying with fallback facingMode: environment', err.message);
       stream = await origGetUserMedia({
-        video: { facingMode: { ideal: 'environment' } },
-        audio: false,
+        ...constraints,
+        video: enhancedVideo,
       });
+    } catch (err: any) {
+      logger.log('warn', '[CAMERA_FIX] Enhanced getUserMedia failed, retrying with original constraints', err.message);
+      try {
+        stream = await origGetUserMedia(constraints);
+      } catch (err2: any) {
+        logger.log('warn', '[CAMERA_FIX] Initial getUserMedia failed, retrying with fallback facingMode: environment', err2.message);
+        stream = await origGetUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
+      }
     }
 
     const track = stream.getVideoTracks()[0];
@@ -192,10 +256,14 @@ export function installCameraFix(): void {
         `[CAMERA_FIX] Track opened: "${label}" (deviceId: ${openedSettings.deviceId}, resolution: ${resolution}, fps: ${openedSettings.frameRate ?? 'unknown'}, focus: ${(openedSettings as any).focusMode ?? 'unknown'})`
       );
 
-      // 2. Check if Safari opened a Telephoto lens instead of the main Wide camera
-      const isTele = /telephoto|tele|zoom|chup xa/i.test(label);
-      if (isTele && !isSwitching) {
-        logger.log('warn', `[CAMERA_FIX] Telephoto lens detected ("${label}"). Attempting switch to 1x Wide camera...`);
+      // 2. Check if Safari opened a Telephoto OR Ultra-Wide (0.5x Macro) lens instead of the main 1x Wide camera
+      const openedInfo = parseCameraInfo({
+        deviceId: settings.deviceId || '',
+        label,
+        kind: 'videoinput',
+      });
+      if ((openedInfo.isTele || openedInfo.isUltra) && !isSwitching) {
+        logger.log('warn', `[CAMERA_FIX] Non-standard lens detected ("${label}", tele=${openedInfo.isTele}, ultra=${openedInfo.isUltra}). Switching to 1x Wide camera...`);
         try {
           isSwitching = true;
           const devices = await origEnumerateDevices();
@@ -205,11 +273,10 @@ export function installCameraFix(): void {
             logger.log('info', `[CAMERA_FIX] Found Wide Camera device: "${wideDev.label}" (${wideDev.deviceId}). Switching...`);
             track.stop();
 
-            const requestedVideo = constraints.video === true ? {} : constraints.video;
             const wideStream = await origGetUserMedia({
               ...constraints,
               video: {
-                ...requestedVideo,
+                ...enhancedVideo,
                 deviceId: { exact: wideDev.deviceId },
               },
             });

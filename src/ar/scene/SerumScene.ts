@@ -189,7 +189,11 @@ export class SerumScene {
 
   private resizeXRCanvasToViewport(): void {
     if (!this.renderer) return;
-    this.renderer.setSize(Math.max(1, window.innerWidth), Math.max(1, window.innerHeight));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const width = Math.max(1, Math.round(window.innerWidth * dpr));
+    const height = Math.max(1, Math.round(window.innerHeight * dpr));
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(width, height, false);
   }
 
   public render(): void {
