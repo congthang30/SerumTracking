@@ -226,6 +226,14 @@ export function useAREngine(): UseAREngineReturn {
       }
       serumScene.userRotationGroup.add(loadedModel.modelScene);
 
+      // Disable frustum culling on all meshes of the loaded model
+      // so it never vanishes when the camera gets close
+      loadedModel.modelScene.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          child.frustumCulled = false;
+        }
+      });
+
       // 3. Initialize the baked GLB timeline; the old procedural hydration FX is unused.
       timelineRef.current = new ProductStoryTimeline(
         serumScene.userRotationGroup,
@@ -402,6 +410,12 @@ export function useAREngine(): UseAREngineReturn {
 
   // Frame rendering and 60fps DOM projection pipeline
   const renderFrame = (driveRender: boolean) => {
+    // Keep camera near clipping plane at 0.01m (1cm) to allow close-up inspection without vanishing
+    if (sceneRef.current?.camera && sceneRef.current.camera.near > 0.01) {
+      sceneRef.current.camera.near = 0.01;
+      sceneRef.current.camera.updateProjectionMatrix();
+    }
+
     trackingRef.current?.inspectWorldAnchor();
     const dt = clockRef.current.getDelta();
     const safeDt = dt > 0.0001 && dt < 0.2 ? dt : 0.016;

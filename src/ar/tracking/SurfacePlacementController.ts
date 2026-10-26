@@ -264,7 +264,8 @@ export class SurfacePlacementController {
               const pz = hit.position.z;
               if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
               const dist = typeof hit.distance === 'number' ? hit.distance : 1.0;
-              if (dist >= 0.20 && dist <= 4.5) {
+              // Ideal tabletop/floor AR placement range: 0.35m to 2.2m
+              if (dist >= 0.35 && dist <= 2.2) {
                 const hitPos = new THREE.Vector3(px, py, pz);
                 if (!this.hasCalibratedPlane) {
                   this.lastPlaneY = hitPos.y;
@@ -291,11 +292,13 @@ export class SurfacePlacementController {
       this.camera.getWorldPosition(camPos);
       this.camera.getWorldDirection(camDir);
 
-      if (camDir.y < -0.10) {
-        const planeY = this.hasCalibratedPlane ? this.lastPlaneY : camPos.y - 0.75;
+      if (camDir.y < -0.08) {
+        const planeY = this.hasCalibratedPlane ? this.lastPlaneY : camPos.y - 0.70;
         if (camPos.y > planeY) {
           const t = (planeY - camPos.y) / camDir.y;
-          if (t >= 0.25 && t <= 4.5) {
+          // Clamp distance to a comfortable tabletop/floor range (0.35m to 2.0m)
+          // Prevents placing the model 3-4 meters away where it appears tiny!
+          if (t >= 0.35 && t <= 2.0) {
             return {
               position: new THREE.Vector3(
                 camPos.x + camDir.x * t,
@@ -304,6 +307,18 @@ export class SurfacePlacementController {
               ),
               normal: new THREE.Vector3(0, 1, 0),
               distance: t,
+            };
+          } else if (t > 2.0) {
+            // When user looks far ahead, anchor the reticle comfortably at 1.35m along ground plane
+            const clampedT = 1.35;
+            return {
+              position: new THREE.Vector3(
+                camPos.x + camDir.x * clampedT,
+                planeY,
+                camPos.z + camDir.z * clampedT
+              ),
+              normal: new THREE.Vector3(0, 1, 0),
+              distance: clampedT,
             };
           }
         }
@@ -358,8 +373,15 @@ export class SurfacePlacementController {
       this.animEndQuat.identity();
     }
 
-    // Target scale in world space
-    this.animEndScale.set(0.85, 0.85, 0.85);
+    // Target scale in world space: 1.35x for a prominent, luxurious presentation on tabletop or floor
+    this.animEndScale.set(1.35, 1.35, 1.35);
+
+    // Disable frustum culling on all child meshes so model never vanishes when camera gets close
+    this.productRoot.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.frustumCulled = false;
+      }
+    });
 
     // Ensure worldAnchorGroup has a clean, identity world transform at (0, 0, 0)
     this.worldAnchorGroup.position.set(0, 0, 0);

@@ -154,6 +154,8 @@ export class SerumScene {
     }
     if ((xrCamera as THREE.PerspectiveCamera).isPerspectiveCamera) {
       this.camera = xrCamera as THREE.PerspectiveCamera;
+      this.camera.near = 0.01; // 1cm near clipping plane allows close-up inspection without geometry disappearing
+      this.camera.updateProjectionMatrix();
     }
     // Ensure AR Camera is added to the XR Scene so children attached to camera (Camera-Locked mode) are traversed & rendered
     if (xrCamera && xrCamera.parent !== xrScene) {

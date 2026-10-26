@@ -741,6 +741,7 @@ export class SerumModelLoader {
               const mesh = child as THREE.Mesh;
               mesh.castShadow = false;
               mesh.receiveShadow = false;
+              mesh.frustumCulled = false;
 
               const lowerName = mesh.name.toLowerCase();
               const matName = ((mesh.material as THREE.Material)?.name || '').toLowerCase();
