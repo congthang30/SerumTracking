@@ -42,6 +42,7 @@ export class SerumScene {
     this.productRoot.add(this.userRotationGroup);
 
     this.setupLighting();
+    this.setupContactShadow();
   }
 
   /**
@@ -106,7 +107,8 @@ export class SerumScene {
         contactShadow.name = 'ContactShadowPlane';
         contactShadow.rotation.x = -Math.PI / 2;
         contactShadow.position.set(0, -0.001, 0);
-        this.rootAnchor.add(contactShadow);
+        contactShadow.visible = false;
+        this.productRoot.add(contactShadow);
       }
     } catch {
       // Contact shadow is an optional visual enhancement.
@@ -175,6 +177,9 @@ export class SerumScene {
     }
     if (this.rootAnchor.parent !== this.scene) {
       this.scene.add(this.rootAnchor);
+    }
+    if (this.worldAnchorGroup.parent !== this.scene) {
+      this.scene.add(this.worldAnchorGroup);
     }
     for (const light of this.lights) {
       if (light.parent !== this.scene) {

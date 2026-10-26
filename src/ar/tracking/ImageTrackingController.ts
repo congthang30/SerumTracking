@@ -49,6 +49,7 @@ export class ImageTrackingController {
   private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
   private worldTrackingReason = 'INITIALIZING';
   private worldTrackingRecoveryUntil = 0;
+  private isSurfacePlaced = false;
   private expectedWorldMatrix: THREE.Matrix4 | null = null;
   private handoffFailureLogged = false;
   private lastHandoffFailureReason = '';
@@ -347,7 +348,11 @@ export class ImageTrackingController {
     }
     if (!this.isWorldAnchored || !this.expectedWorldMatrix) return;
 
-    this.monitorAnchorCameraPose();
+    // In Surface World Tracking mode, the world anchor represents physical ground truth in SLAM space.
+    // The camera moves in 6DoF relative to it; camera motion must NEVER rebase or shift the world anchor.
+    if (!this.isSurfacePlaced) {
+      this.monitorAnchorCameraPose();
+    }
     this.productRoot.updateWorldMatrix(true, false);
     const matrixError = this.maxMatrixDifference(this.productRoot.matrixWorld, this.expectedWorldMatrix);
     const hiddenAncestor = this.firstHiddenAncestor(this.productRoot);
@@ -860,6 +865,7 @@ export class ImageTrackingController {
     rotationStep: number,
     elapsedMs: number
   ): boolean {
+    if (this.isSurfacePlaced) return false;
     const parent = this.worldAnchorGroup.parent;
     if (!parent || this.productRoot.parent !== this.worldAnchorGroup) return false;
     const debugAnchorBefore = worldTrackingDebugger.captureTransform(this.worldAnchorGroup);
@@ -1133,6 +1139,41 @@ export class ImageTrackingController {
       this.productRoot.updateMatrix();
       this.isCentering = false;
     }
+  }
+
+  /**
+   * Unlocks camera and preserves the placed world transform in World Tracking mode.
+   */
+  public unlockCamera(placedWorldMatrix?: THREE.Matrix4): void {
+    this.isCameraLocked = false;
+    this.isCentering = false;
+    this.isSurfacePlaced = true;
+    this.state = 'ANCHORED';
+    this.isTracked = true;
+    this.hasPreviousAnchorCameraSample = false;
+    this.productRoot.updateWorldMatrix(true, true);
+    this.expectedWorldMatrix = placedWorldMatrix
+      ? placedWorldMatrix.clone()
+      : this.productRoot.matrixWorld.clone();
+    logger.log('info', '[AR_ANCHOR] 🔓 Camera lock released. Product is now placed in World Tracking mode.');
+  }
+
+  /**
+   * Called once surface placement glide animation completes to seal the expected world matrix.
+   */
+  public notifyPlacementSettled(placedWorldMatrix: THREE.Matrix4): void {
+    this.isSurfacePlaced = true;
+    this.expectedWorldMatrix = placedWorldMatrix.clone();
+    this.hasPreviousAnchorCameraSample = false;
+    logger.log('info', '[AR_ANCHOR] 📍 Surface placement settled. World anchor transform firmly locked.');
+  }
+
+  /**
+   * Re-locks product back to camera for repositioning.
+   */
+  public relockCamera(): void {
+    this.isSurfacePlaced = false;
+    this.detachIntoCamera();
   }
 
   private detachIntoWorldAnchor(): boolean {

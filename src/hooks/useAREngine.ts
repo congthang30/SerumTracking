@@ -7,6 +7,7 @@ import { SerumModelLoader, LoadedSerumModel } from '../ar/models/SerumModelLoade
 import { ProductStoryTimeline, StoryPhase } from '../ar/animation/ProductStoryTimeline';
 import { ImageTrackingController } from '../ar/tracking/ImageTrackingController';
 import { EightWallManager } from '../ar/engine/EightWallManager';
+import { SurfacePlacementController } from '../ar/tracking/SurfacePlacementController';
 import { beginARTraceSession, traceAR } from '../ar/xr/camera-fix';
 import { DEBUG_AR_PERF, worldTrackingDebugger } from '../ar/debug/WorldTrackingDebugger';
 import { arPerformanceMonitor } from '../ar/debug/ARPerformanceMonitor';
@@ -27,6 +28,11 @@ export interface UseAREngineReturn {
   replaySequence: () => void;
   toggleSimulation: () => void;
   startExperience: () => void;
+  hasTargetFound: boolean;
+  isCameraLocked: boolean;
+  canPlaceOnSurface: boolean;
+  placeOnSurface: () => void;
+  relockToCamera: () => void;
 }
 
 function isMobileDevice(): boolean {
@@ -71,11 +77,16 @@ export function useAREngine(): UseAREngineReturn {
     });
   }, []);
 
+  const [hasTargetFound, setHasTargetFound] = useState(isSimulation);
+  const [canPlaceOnSurface, setCanPlaceOnSurface] = useState(false);
+  const [isCameraLocked, setIsCameraLocked] = useState(true);
+
   // Engine references kept outside React state for 60fps performance
   const sceneRef = useRef<SerumScene | null>(null);
   const modelRef = useRef<LoadedSerumModel | null>(null);
   const timelineRef = useRef<ProductStoryTimeline | null>(null);
   const trackingRef = useRef<ImageTrackingController | null>(null);
+  const surfacePlacementRef = useRef<SurfacePlacementController | null>(null);
   const eightWallRef = useRef<EightWallManager | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const clockRef = useRef(new THREE.Clock());
@@ -124,6 +135,20 @@ export function useAREngine(): UseAREngineReturn {
 
   const closeIngredientModal = useCallback(() => {
     setActiveIngredient(null);
+  }, []);
+
+  const placeOnSurface = useCallback(() => {
+    if (surfacePlacementRef.current?.placeProduct()) {
+      trackingRef.current?.unlockCamera();
+      setIsCameraLocked(false);
+      setCanPlaceOnSurface(false);
+    }
+  }, []);
+
+  const relockToCamera = useCallback(() => {
+    surfacePlacementRef.current?.relockToCamera();
+    trackingRef.current?.relockCamera();
+    setIsCameraLocked(true);
   }, []);
 
   const replaySequence = useCallback(() => {
@@ -218,6 +243,22 @@ export function useAREngine(): UseAREngineReturn {
         canvas
       );
 
+      // Initialize surface placement controller for plane detection and world tracking handoff
+      surfacePlacementRef.current = new SurfacePlacementController(
+        serumScene.scene,
+        serumScene.camera,
+        serumScene.productRoot,
+        serumScene.worldAnchorGroup,
+        isSimulation
+      );
+      surfacePlacementRef.current.onPlacementChanged = (isPlaced, canPlace) => {
+        setIsCameraLocked(!isPlaced);
+        setCanPlaceOnSurface(canPlace);
+      };
+      surfacePlacementRef.current.onPlacementSettled = (placedMatrix) => {
+        trackingRef.current?.notifyPlacementSettled(placedMatrix);
+      };
+
       // 4. Handle Simulation Mode vs Real 8th Wall AR
       if (isSimulation) {
         setupSimulationMode(serumScene, canvas);
@@ -261,6 +302,11 @@ export function useAREngine(): UseAREngineReturn {
     });
 
     sceneObj.rootAnchor.visible = true;
+    surfacePlacementRef.current?.attachToSimScene(sceneObj.scene, sceneObj.camera);
+    surfacePlacementRef.current?.setTargetFound(true);
+    setHasTargetFound(true);
+    trackingRef.current?.lockToCameraAtCenter();
+    setIsCameraLocked(true);
     startModelAnimation();
     timelineRef.current?.start();
 
@@ -283,6 +329,7 @@ export function useAREngine(): UseAREngineReturn {
     await manager.startAR(canvas, {
       onCameraStarted: ({ scene, camera, renderer, runtimeVersion }) => {
         sceneObj.attachToXRScene(scene, camera, renderer);
+        surfacePlacementRef.current?.attachToXRScene(scene, camera);
         trackingRef.current?.setCamera(camera);
         worldTrackingDebugger.setSceneObjects({
           scene,
@@ -303,11 +350,17 @@ export function useAREngine(): UseAREngineReturn {
           startModelAnimation();
           timelineRef.current?.start();
           manager.disableImageTargets();
+          surfacePlacementRef.current?.setTargetFound(true);
+          setHasTargetFound(true);
         }
       },
       onTargetUpdated: (pose) => {
         const anchoredNow = trackingRef.current?.handleImageUpdated(pose, 0) ?? false;
-        if (anchoredNow) manager.disableImageTargets();
+        if (anchoredNow) {
+          manager.disableImageTargets();
+          surfacePlacementRef.current?.setTargetFound(true);
+          setHasTargetFound(true);
+        }
       },
       onTargetLost: () => trackingRef.current?.handleImageLost(),
       onWorldTrackingStatus: (status, reason) => {
@@ -350,12 +403,13 @@ export function useAREngine(): UseAREngineReturn {
   // Frame rendering and 60fps DOM projection pipeline
   const renderFrame = (driveRender: boolean) => {
     trackingRef.current?.inspectWorldAnchor();
+    const dt = clockRef.current.getDelta();
+    const safeDt = dt > 0.0001 && dt < 0.2 ? dt : 0.016;
+    surfacePlacementRef.current?.update(safeDt);
     const scene = sceneRef.current;
     const debugStoryBefore = worldTrackingDebugger.captureTransform(scene?.userRotationGroup);
     const debugBottleBefore = worldTrackingDebugger.captureTransform(modelRef.current?.bottleGroup);
     const debugModelBefore = worldTrackingDebugger.captureTransform(modelRef.current?.modelScene);
-    const dt = clockRef.current.getDelta();
-    const safeDt = dt > 0.0001 && dt < 0.2 ? dt : 0.016;
 
     // 1. Update Master 6-Phase Story Timeline (1.0x original dynamic speed)
     const story = timelineRef.current?.update(safeDt, isPointerDownRef.current);
@@ -631,6 +685,12 @@ export function useAREngine(): UseAREngineReturn {
       if (clickedIng) {
         lastModalOpenTimeRef.current = now;
         openIngredientModal(clickedIng);
+        return;
+      }
+
+      // Tap on canvas/surface to place product when surface is detected
+      if (isCameraLocked && canPlaceOnSurface) {
+        placeOnSurface();
       }
     };
 
@@ -675,6 +735,7 @@ export function useAREngine(): UseAREngineReturn {
         cancelAnimationFrame(animFrameRef.current);
       }
       trackingRef.current?.dispose();
+      surfacePlacementRef.current?.dispose();
       eightWallRef.current?.stopAR();
       worldTrackingDebugger.stop();
       arPerformanceMonitor.stop();
@@ -707,5 +768,10 @@ export function useAREngine(): UseAREngineReturn {
     replaySequence,
     toggleSimulation,
     startExperience,
+    hasTargetFound,
+    isCameraLocked,
+    canPlaceOnSurface,
+    placeOnSurface,
+    relockToCamera,
   };
 }

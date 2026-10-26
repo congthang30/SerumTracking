@@ -58,8 +58,8 @@ export class ProductStoryTimeline {
   // User interactive 360 rotation angle
   public userBottleRotY = 0;
 
-  // Continuous auto-rotation from right to left (~18.3 deg/sec luxury turntable showcase speed)
-  public autoRotateSpeed = 0.32;
+  // Continuous auto-rotation from right to left (~27.5 deg/sec luxury turntable showcase speed, increased 1.5x)
+  public autoRotateSpeed = 0.48;
   public autoRotateAngle = 0;
 
   constructor(
