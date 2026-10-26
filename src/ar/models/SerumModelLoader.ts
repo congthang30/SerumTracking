@@ -1271,6 +1271,31 @@ export class SerumModelLoader {
             );
           }
 
+          // Add invisible hit proxy spheres to each active molecule controller for seamless tap/click detection
+          const hitProxyGeo = new THREE.SphereGeometry(0.28, 16, 16);
+          const hitProxyMat = new THREE.MeshBasicMaterial({
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+          });
+
+          const attachHitTarget = (ctrl: THREE.Object3D | null | undefined, ingId: string, meshName: string) => {
+            if (!ctrl) return;
+            ctrl.userData.ingredientId = ingId;
+            ctrl.traverse((child) => {
+              child.userData.ingredientId = ingId;
+            });
+            const hitMesh = new THREE.Mesh(hitProxyGeo, hitProxyMat);
+            hitMesh.name = meshName;
+            hitMesh.position.set(0, -0.06, 0);
+            hitMesh.userData.ingredientId = ingId;
+            ctrl.add(hitMesh);
+          };
+
+          attachHitTarget(b5Ctrl, 'b5', 'B5_HitTarget');
+          attachHitTarget(haCtrl, 'ha', 'HA_HitTarget');
+          attachHitTarget(vcCtrl, 'c', 'VC_HitTarget');
+
           const anchors: Record<string, THREE.Object3D> = {};
           const elbows: Record<string, THREE.Object3D> = {};
           const calloutLines: Record<string, Line2> = {};

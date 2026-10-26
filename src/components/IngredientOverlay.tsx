@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Ingredient } from '../types/ar';
 
 interface IngredientOverlayProps {
@@ -11,6 +11,20 @@ export const IngredientOverlay: React.FC<IngredientOverlayProps> = ({
   activeIngredient,
   onCloseModal,
 }) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCloseModal();
+      }
+    };
+    if (activeIngredient) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeIngredient, onCloseModal]);
+
   return (
     <>
       {/* Luxury Detail Modal Popup (Triggered by clicking 3D badges) */}
@@ -21,17 +35,25 @@ export const IngredientOverlay: React.FC<IngredientOverlayProps> = ({
             if (e.target === e.currentTarget) onCloseModal();
           }}
         >
-          <div className="modal-content">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close-icon-btn"
+              onClick={onCloseModal}
+              aria-label="Đóng popup"
+              title="Đóng"
+            >
+              ✕
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '12px' }}>
               {activeIngredient.iconSvg && (
                 <img
                   src={activeIngredient.iconSvg}
                   alt={activeIngredient.title}
-                  style={{ width: '40px', height: '40px', objectFit: 'contain', flexShrink: 0 }}
+                  style={{ width: '44px', height: '44px', objectFit: 'contain', flexShrink: 0 }}
                 />
               )}
-              <div>
-                <span className="modal-tag" style={{ display: 'block', marginBottom: '2px' }}>
+              <div style={{ paddingRight: '24px' }}>
+                <span className="modal-tag" style={{ display: 'block', marginBottom: '3px' }}>
                   Thành phần {activeIngredient.number} • {activeIngredient.tag}
                 </span>
                 <h2 className="modal-title" style={{ margin: 0 }}>{activeIngredient.title}</h2>

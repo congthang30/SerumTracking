@@ -258,3 +258,26 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+.modal-close-icon-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-rose-gold-dark);
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.modal-close-icon-btn:hover {
+  background: rgba(201, 150, 136, 0.18);
+  transform: scale(1.12);
+}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { Ingredient } from '../types/ar';
+import { getIngredientById } from '../data/ingredients';
 import { SerumScene } from '../ar/scene/SerumScene';
 import { SerumModelLoader, LoadedSerumModel } from '../ar/models/SerumModelLoader';
 import { ProductStoryTimeline, StoryPhase } from '../ar/animation/ProductStoryTimeline';
@@ -85,6 +86,10 @@ export function useAREngine(): UseAREngineReturn {
   const isPointerDownRef = useRef(false);
   const lastPointerXRef = useRef(0);
   const userRotVelRef = useRef(0);
+  const pointerDownPosRef = useRef({ x: 0, y: 0 });
+  const pointerDownTimeRef = useRef(0);
+  const hasDraggedRef = useRef(false);
+  const lastModalOpenTimeRef = useRef(0);
 
   // Simulation mode tabletop poster reference
   const posterMeshRef = useRef<THREE.Mesh | null>(null);
@@ -469,36 +474,169 @@ export function useAREngine(): UseAREngineReturn {
     }
   };
 
-  // Pointer event listeners for interactive 360-degree rotation in Phase 6
+  const findIngredientAtScreenPoint = useCallback((clientX: number, clientY: number): Ingredient | null => {
+    const canvas = canvasRef.current;
+    const camera = sceneRef.current?.camera;
+    const model = modelRef.current;
+    if (!canvas || !camera || !model) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+      return null;
+    }
+
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+
+    const src = model.sourceScene;
+    const items: { ctrl: THREE.Object3D; id: string }[] = [];
+    const b5 = src.getObjectByName('B5_Controller');
+    const ha = src.getObjectByName('HA_Controller');
+    const vc = src.getObjectByName('VC_Controller');
+    if (b5) items.push({ ctrl: b5, id: 'b5' });
+    if (ha) items.push({ ctrl: ha, id: 'ha' });
+    if (vc) items.push({ ctrl: vc, id: 'c' });
+
+    // Only active when visible and scaled up (> 0.15)
+    const activeItems = items.filter((item) => item.ctrl.visible && item.ctrl.scale.x > 0.15);
+    if (activeItems.length === 0) return null;
+
+    // 1. Raycast against active molecule controllers & children
+    const testRoots = activeItems.map((item) => item.ctrl);
+    const intersects = raycaster.intersectObjects(testRoots, true);
+
+    if (intersects.length > 0) {
+      for (const hit of intersects) {
+        let cur: THREE.Object3D | null = hit.object;
+        while (cur && cur !== src) {
+          if (cur.userData?.ingredientId) {
+            const ing = getIngredientById(cur.userData.ingredientId);
+            if (ing) return ing;
+          }
+          if (cur.name === 'B5_Controller' || cur.name.startsWith('B5_')) {
+            const ing = getIngredientById('b5');
+            if (ing) return ing;
+          }
+          if (cur.name === 'HA_Controller' || cur.name.startsWith('HA_')) {
+            const ing = getIngredientById('ha');
+            if (ing) return ing;
+          }
+          if (cur.name === 'VC_Controller' || cur.name.startsWith('VC_')) {
+            const ing = getIngredientById('c');
+            if (ing) return ing;
+          }
+          cur = cur.parent;
+        }
+      }
+    }
+
+    // 2. Fallback: Screen-space proximity check for reliable touch targets on mobile
+    const worldPos = new THREE.Vector3();
+    let minDistance = 46; // pixel touch radius tolerance
+    let matchedIng: Ingredient | null = null;
+
+    for (const { ctrl, id } of activeItems) {
+      ctrl.getWorldPosition(worldPos);
+      worldPos.project(camera);
+      if (worldPos.z > 1) continue; // Behind camera
+
+      const sx = ((worldPos.x + 1) * 0.5) * rect.width + rect.left;
+      const sy = ((-worldPos.y + 1) * 0.5) * rect.height + rect.top;
+      const d = Math.hypot(clientX - sx, clientY - sy);
+      if (d < minDistance) {
+        minDistance = d;
+        matchedIng = getIngredientById(id) ?? null;
+      }
+    }
+
+    return matchedIng;
+  }, []);
+
+  // Pointer event listeners for interactive 360-degree rotation in Phase 6 and clicking ingredient molecules
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
       if ((e.target as HTMLElement).closest('.interactive-ui')) return;
       isPointerDownRef.current = true;
       lastPointerXRef.current = e.clientX;
+      pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+      pointerDownTimeRef.current = performance.now();
+      hasDraggedRef.current = false;
       userRotVelRef.current = 0;
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (!isPointerDownRef.current) return;
-      const dx = e.clientX - lastPointerXRef.current;
-      lastPointerXRef.current = e.clientX;
+      if (isPointerDownRef.current) {
+        const dist = Math.hypot(
+          e.clientX - pointerDownPosRef.current.x,
+          e.clientY - pointerDownPosRef.current.y
+        );
+        if (dist > 8) {
+          hasDraggedRef.current = true;
+        }
+        const dx = e.clientX - lastPointerXRef.current;
+        lastPointerXRef.current = e.clientX;
 
-      // In real AR mode, swipe rotates the bottle in Phase 6. In simulation mode, OrbitControls handles scene inspection.
-      if (!isSimulation && timelineRef.current) {
-        const delta = dx * 0.009;
-        userRotVelRef.current = delta;
-        timelineRef.current.userBottleRotY += delta;
+        // In real AR mode, swipe rotates the bottle in Phase 6. In simulation mode, OrbitControls handles scene inspection.
+        if (!isSimulation && timelineRef.current) {
+          const delta = dx * 0.009;
+          userRotVelRef.current = delta;
+          timelineRef.current.userBottleRotY += delta;
+        }
+      } else {
+        // Desktop hover cursor feedback
+        if (!isMobileDevice() && canvasRef.current) {
+          const hovered = findIngredientAtScreenPoint(e.clientX, e.clientY);
+          canvasRef.current.style.cursor = hovered ? 'pointer' : 'default';
+        }
       }
     };
 
-    const onPointerUp = () => {
+    const onPointerUp = (e: PointerEvent) => {
+      if (!isPointerDownRef.current) return;
       isPointerDownRef.current = false;
+
+      const duration = performance.now() - pointerDownTimeRef.current;
+      if (!hasDraggedRef.current && duration < 500) {
+        const now = performance.now();
+        if (now - lastModalOpenTimeRef.current < 250) return;
+
+        const clickedIng = findIngredientAtScreenPoint(e.clientX, e.clientY);
+        if (clickedIng) {
+          lastModalOpenTimeRef.current = now;
+          // Scale pulse reaction on clicked molecule
+          const ctrlName =
+            clickedIng.id === 'b5' ? 'B5_Controller' :
+            clickedIng.id === 'ha' ? 'HA_Controller' : 'VC_Controller';
+          const ctrl = modelRef.current?.sourceScene.getObjectByName(ctrlName);
+          if (ctrl) {
+            ctrl.scale.multiplyScalar(1.22);
+          }
+          openIngredientModal(clickedIng);
+        }
+      }
+    };
+
+    const onCanvasClick = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest('.interactive-ui')) return;
+      const now = performance.now();
+      if (now - lastModalOpenTimeRef.current < 300) return;
+      if (hasDraggedRef.current) return;
+
+      const clickedIng = findIngredientAtScreenPoint(e.clientX, e.clientY);
+      if (clickedIng) {
+        lastModalOpenTimeRef.current = now;
+        openIngredientModal(clickedIng);
+      }
     };
 
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('click', onCanvasClick);
 
     const onResize = () => {
       sceneRef.current?.handleResize();
@@ -510,9 +648,10 @@ export function useAREngine(): UseAREngineReturn {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('click', onCanvasClick);
       window.removeEventListener('resize', onResize);
     };
-  }, []);
+  }, [findIngredientAtScreenPoint, isSimulation, openIngredientModal]);
 
   // Start AR on mobile and the interactive 3D preview on desktops automatically.
   useEffect(() => {
