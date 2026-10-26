@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { Ingredient } from '../types/ar';
 import { getIngredientById } from '../data/ingredients';
-import { SerumScene } from '../ar/scene/SerumScene';
+import { SerumScene, applyNearClippingPlaneToXRCamera } from '../ar/scene/SerumScene';
 import { SerumModelLoader, LoadedSerumModel } from '../ar/models/SerumModelLoader';
 import { ProductStoryTimeline, StoryPhase } from '../ar/animation/ProductStoryTimeline';
 import { ImageTrackingController } from '../ar/tracking/ImageTrackingController';
@@ -410,10 +410,10 @@ export function useAREngine(): UseAREngineReturn {
 
   // Frame rendering and 60fps DOM projection pipeline
   const renderFrame = (driveRender: boolean) => {
-    // Keep camera near clipping plane at 0.01m (1cm) to allow close-up inspection without vanishing
-    if (sceneRef.current?.camera && sceneRef.current.camera.near > 0.01) {
-      sceneRef.current.camera.near = 0.01;
-      sceneRef.current.camera.updateProjectionMatrix();
+    // Safely enforce 0.01m (1cm) near clipping plane without calling updateProjectionMatrix(),
+    // preserving 8th Wall's physical camera calibration matrix so close-ups never jump or distort
+    if (sceneRef.current?.camera) {
+      applyNearClippingPlaneToXRCamera(sceneRef.current.camera, 0.01);
     }
 
     trackingRef.current?.inspectWorldAnchor();

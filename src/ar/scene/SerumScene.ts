@@ -1,6 +1,38 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+/**
+ * Safely updates the near clipping plane on an 8th Wall XR camera (PerspectiveCamera)
+ * WITHOUT calling camera.updateProjectionMatrix().
+ * 
+ * 8th Wall calculates its projection matrix from physical camera lens calibration (focal length fx, fy
+ * and asymmetric optical center cx, cy). Calling Three.js camera.updateProjectionMatrix() completely
+ * destroys this calibration by recalculating a symmetric pinhole matrix, which causes severe visual
+ * distortion and makes models violently jump toward the top-left corner as the camera approaches!
+ * 
+ * By modifying ONLY elements[10] and elements[14] (depth row in column-major order), we adjust the near
+ * clipping plane to 1cm (0.01m) while preserving 100% of 8th Wall's physical lens intrinsics.
+ */
+export function applyNearClippingPlaneToXRCamera(
+  camera: THREE.Camera,
+  targetNear = 0.01
+): void {
+  const perspectiveCamera = camera as THREE.PerspectiveCamera;
+  if (!perspectiveCamera || !perspectiveCamera.isPerspectiveCamera) return;
+  perspectiveCamera.near = targetNear;
+
+  const elements = perspectiveCamera.projectionMatrix?.elements;
+  if (!elements || elements.length < 16) return;
+
+  const far = perspectiveCamera.far || 1000;
+  // Standard perspective projection matrix depth terms:
+  // elements[10] = -(far + near) / (far - near)
+  // elements[14] = -(2 * far * near) / (far - near)
+  elements[10] = -(far + targetNear) / (far - targetNear);
+  elements[14] = -(2 * far * targetNear) / (far - targetNear);
+  perspectiveCamera.projectionMatrixInverse.copy(perspectiveCamera.projectionMatrix).invert();
+}
+
 export class SerumScene {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
@@ -154,8 +186,8 @@ export class SerumScene {
     }
     if ((xrCamera as THREE.PerspectiveCamera).isPerspectiveCamera) {
       this.camera = xrCamera as THREE.PerspectiveCamera;
-      this.camera.near = 0.01; // 1cm near clipping plane allows close-up inspection without geometry disappearing
-      this.camera.updateProjectionMatrix();
+      // Safely set 1cm near clipping plane on the 8th Wall XR camera WITHOUT destroying lens intrinsics
+      applyNearClippingPlaneToXRCamera(this.camera, 0.01);
     }
     // Ensure AR Camera is added to the XR Scene so children attached to camera (Camera-Locked mode) are traversed & rendered
     if (xrCamera && xrCamera.parent !== xrScene) {

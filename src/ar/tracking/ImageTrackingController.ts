@@ -238,7 +238,7 @@ export class ImageTrackingController {
 
   /** Returns true only for the first image detection in this AR session. */
   public handleImageFound(pose: ImagePose, rotationDeg = 0): boolean {
-    if (this.isCameraLocked || this.state === 'ANCHORED') return false;
+    if (this.isCameraLocked || this.state === 'ANCHORED' || this.isSurfacePlaced) return false;
     if (this.ignoreImageEvent('imagefound')) return false;
     if (!this.isValidPose(pose)) {
       traceAR('IMAGE_FOUND_IGNORED', { reason: 'invalid pose' }, 'warn');
@@ -285,7 +285,7 @@ export class ImageTrackingController {
 
   /** Once camera-locked, image poses are completely ignored to avoid conflicts. */
   public handleImageUpdated(pose: ImagePose, rotationDeg = 0): boolean {
-    if (this.isCameraLocked || this.state === 'ANCHORED') return false;
+    if (this.isCameraLocked || this.state === 'ANCHORED' || this.isSurfacePlaced) return false;
     if (this.ignoreImageEvent('imageupdated')) return false;
     if (!this.isValidPose(pose)) return false;
 
@@ -299,8 +299,8 @@ export class ImageTrackingController {
 
   /** Poster loss never hides or resets the model once locked to camera. */
   public handleImageLost(): void {
-    if (this.isCameraLocked || this.state === 'ANCHORED') {
-      // In Camera-Locked mode, the model stays locked to camera; poster loss has zero effect
+    if (this.isCameraLocked || this.state === 'ANCHORED' || this.isSurfacePlaced) {
+      // In Camera-Locked or Surface-Placed mode, the model stays anchored; poster loss has zero effect
       return;
     }
     if (this.ignoreImageEvent('imagelost')) return;

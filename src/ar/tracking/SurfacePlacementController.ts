@@ -391,9 +391,14 @@ export class SurfacePlacementController {
     this.worldAnchorGroup.updateMatrix();
     this.worldAnchorGroup.updateWorldMatrix(true, true);
 
+    // Update camera and product matrices before reparenting to ensure attach() captures pristine world coords
+    this.camera.updateMatrixWorld(true);
+    this.productRoot.updateMatrixWorld(true);
+
     // Reparent productRoot cleanly from camera into worldAnchorGroup
     // Using attach() preserves the exact current world transform with zero visual jump!
     this.worldAnchorGroup.attach(this.productRoot);
+    this.productRoot.updateMatrixWorld(true);
 
     // Capture starting world transform
     this.animStartPos.copy(this.productRoot.position);
@@ -452,9 +457,10 @@ export class SurfacePlacementController {
   public relockToCamera(): void {
     if (!this.productRoot || !this.camera) return;
 
+    this.camera.updateMatrixWorld(true);
+    this.productRoot.updateMatrixWorld(true);
     this.camera.attach(this.productRoot);
-    this.productRoot.updateMatrix();
-    this.productRoot.updateWorldMatrix(true, true);
+    this.productRoot.updateMatrixWorld(true);
 
     this.isPlaced = false;
     this.isAnimatingPlacement = false;
