@@ -47,7 +47,7 @@ export class SerumScene {
   public productRoot: THREE.Group;
   public userRotationGroup: THREE.Group;
   public lights: THREE.Light[] = [];
-  /** 3D Grid on the detected tabletop plane for visual verification of 8th Wall SLAM accuracy. */
+  /** 3D grid on XR8's ground reference. */
   public planeDebugGrid: THREE.GridHelper;
 
   constructor() {
@@ -77,7 +77,7 @@ export class SerumScene {
     this.userRotationGroup.name = 'UserRotationGroup';
     this.productRoot.add(this.userRotationGroup);
 
-    // 3D Tabletop Plane Debug Grid Helper (toggleable for inspecting 8th Wall SLAM plane accuracy)
+    // Grid for XR8's ground reference.
     this.planeDebugGrid = new THREE.GridHelper(1.8, 18, 0xd4af37, 0x4a4a4a);
     this.planeDebugGrid.name = 'PlaneDebugGrid';
     this.planeDebugGrid.position.set(0, -0.001, 0);
@@ -245,10 +245,6 @@ export class SerumScene {
 
   public setPlaneGridVisible(visible: boolean): void {
     this.planeDebugGrid.visible = visible;
-  }
-
-  public get isPlaneGridVisible(): boolean {
-    return this.planeDebugGrid.visible;
   }
 
   public handleResize(): void {

@@ -1,15 +1,13 @@
 import * as THREE from 'three';
 import { logger } from '../../utils/logger';
 
-export interface SurfaceHit {
+interface PreviewIntersection {
   position: THREE.Vector3;
-  normal: THREE.Vector3;
-  distance: number;
 }
 
 export class SurfacePlacementController {
-  /** Target real-world height of the product when placed on surface (exactly 20cm / 0.20m). */
-  public static readonly TARGET_PLACED_HEIGHT_METERS = 0.20;
+  /** Placed product height: 1.5x the previous 20 cm size. */
+  public static readonly TARGET_PLACED_HEIGHT_METERS = 0.30;
 
   private scene: THREE.Scene | null = null;
   private camera: THREE.Camera | null = null;
@@ -29,21 +27,20 @@ export class SurfacePlacementController {
   private isTargetFound = false;
   private isPlaced = false;
   private canPlace = false;
-  private hasSurface = false;
+  private hasPreviewIntersection = false;
   private animTime = 0;
 
-  // Surface tracking & plane estimation
+  // XR8 exposes one ground reference. Preview stays on its Y=0 plane.
   private readonly targetHitPosition = new THREE.Vector3();
-  private smoothedPlaneY = 0;
-  private hasEstablishedPlane = false;
-  private candidatePlaneY = 0;
-  private candidateSampleCount = 0;
-  private initialPosterPosition: THREE.Vector3 | null = null;
-  private lastHitDistance = 0;
-  private cameraPitchTooHigh = false;
+  private stableTrackingSeconds = 0;
+  private readonly lastCameraPosition = new THREE.Vector3();
+  private readonly lastCameraQuaternion = new THREE.Quaternion();
+  private hasCameraSample = false;
+  private readonly previewPosition = new THREE.Vector3();
+  private hasPreviewPosition = false;
   private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
   private worldTrackingReason = 'INITIALIZING';
-  private currentGuidance = 'Lia camera tới mặt bàn hoặc sàn';
+  private currentGuidance = 'Giữ camera ổn định trên mặt sàn';
   private lastReportedGuidance = '';
 
   // Placement glide animation
@@ -93,30 +90,13 @@ export class SurfacePlacementController {
     }
   }
 
-  public setTargetFound(found: boolean, initialPosePosition?: THREE.Vector3): void {
+  public setTargetFound(found: boolean): void {
     this.isTargetFound = found;
     if (found) {
-      if (initialPosePosition) {
-        // Calibrate plane height directly to the scanned target on the table!
-        this.smoothedPlaneY = initialPosePosition.y;
-        this.hasEstablishedPlane = true;
-        this.initialPosterPosition = initialPosePosition.clone();
-        this.targetHitPosition.copy(initialPosePosition);
-        if (this.reticleGroup) {
-          this.reticleGroup.position.copy(initialPosePosition);
-          this.reticleGroup.visible = true;
-        }
-        this.hasSurface = true;
-        this.notifyPlacementState(true, 'Đặt sản phẩm tại đây');
-      } else {
-        this.hasSurface = false;
-        this.notifyPlacementState(false, 'Lia camera tới mặt bàn hoặc sàn');
-      }
+      this.invalidatePreview();
+      this.notifyPlacementState(false, 'Giữ camera ổn định trên mặt sàn');
     } else {
-      this.hasSurface = false;
-      if (this.reticleGroup) {
-        this.reticleGroup.visible = false;
-      }
+      this.invalidatePreview();
       this.notifyPlacementState(false, 'Lia camera tới mục tiêu');
     }
   }
@@ -124,6 +104,7 @@ export class SurfacePlacementController {
   public setTrackingStatus(status: 'NORMAL' | 'LIMITED', reason = 'UNDEFINED'): void {
     this.worldTrackingStatus = status;
     this.worldTrackingReason = reason;
+    if (status !== 'NORMAL') this.invalidatePreview();
   }
 
   public get trackingStatusInfo(): { status: 'NORMAL' | 'LIMITED'; reason: string } {
@@ -131,25 +112,15 @@ export class SurfacePlacementController {
   }
 
   public get planeY(): number {
-    return this.smoothedPlaneY;
+    return 0;
   }
 
   public get currentSurfacePosition(): THREE.Vector3 {
     return this.targetHitPosition;
   }
 
-  public get isPlaneCalibrated(): boolean {
-    return this.hasEstablishedPlane;
-  }
-
-  public adjustPlaneY(deltaMeters: number): void {
-    this.smoothedPlaneY += deltaMeters;
-    this.hasEstablishedPlane = true;
-    logger.log('info', `[SURFACE_PLACEMENT] Manually adjusted planeY by ${deltaMeters}m to ${this.smoothedPlaneY.toFixed(3)}m`);
-  }
-
-  public get hitDistance(): number {
-    return this.lastHitDistance;
+  public get hasStablePreview(): boolean {
+    return this.hasPreviewIntersection;
   }
 
   public get hasTargetBeenFound(): boolean {
@@ -160,7 +131,7 @@ export class SurfacePlacementController {
     return this.isPlaced;
   }
 
-  public get isSurfaceDetected(): boolean {
+  public get isPlacementReady(): boolean {
     return this.canPlace;
   }
 
@@ -185,11 +156,11 @@ export class SurfacePlacementController {
     group.name = 'SurfaceReticleGroup';
     group.visible = false;
 
-    // Reticle radius proportioned to match the 20cm-tall product footprint (width ~23.7cm, radius ~11.8cm)
+    // Reticle radius matches the 30 cm placed product footprint (width ~35.5 cm).
     const targetScale = this.normalizedModelHeight > 0
       ? SurfacePlacementController.TARGET_PLACED_HEIGHT_METERS / this.normalizedModelHeight
-      : 0.327;
-    const footprintRadius = Math.max(0.10, (this.normalizedModelWidth * targetScale) / 2); // ~0.118m (11.8cm radius, 23.7cm diameter)
+      : 0.4901;
+    const footprintRadius = Math.max(0.10, (this.normalizedModelWidth * targetScale) / 2);
 
     // 1. Outer Ring: Luxury Champagne Rose Gold
     const ringInner = footprintRadius * 0.90; // ~0.107m
@@ -259,15 +230,8 @@ export class SurfacePlacementController {
   public update(dt: number): void {
     this.animTime += dt;
 
-    // Do NOT detect surfaces or show placement reticle before image target is scanned
     if (!this.isTargetFound) {
-      if (this.reticleGroup.visible) {
-        this.reticleGroup.visible = false;
-      }
-      if (this.canPlace) {
-        this.canPlace = false;
-        this.onPlacementChanged?.(false, false);
-      }
+      this.reticleGroup.visible = false;
       return;
     }
 
@@ -284,211 +248,114 @@ export class SurfacePlacementController {
       this.reticleCenterDot.scale.set(s, s, 1);
     }
 
-    // Process placement glide transition if animating
     if (this.isAnimatingPlacement) {
       this.updatePlacementAnimation();
-      return;
     }
 
-    // Once placed, the reticle stays hidden
-    if (this.isPlaced) {
-      if (this.reticleGroup.visible) {
-        this.reticleGroup.visible = false;
-      }
-      return;
-    }
+    // The ground grid remains independent after placement and never changes
+    // ProductRoot or SerumWorldAnchor.
+    const intersection = this.projectGroundPlane(dt);
+    if (intersection) {
+      this.targetHitPosition.copy(intersection.position);
+      this.hasPreviewIntersection = true;
 
-    // 6DoF World Tracking check
-    if (!this.isSimulation && !this.camera) {
-      this.hasSurface = false;
-      if (this.reticleGroup.visible) this.reticleGroup.visible = false;
-      this.notifyPlacementState(false, 'Đang khởi động camera...');
-      return;
-    }
-
-    // Detect surface in front of camera
-    const surfaceHit = this.detectSurface();
-    if (surfaceHit) {
-      this.targetHitPosition.copy(surfaceHit.position);
-      this.hasSurface = true;
-
-      if (!this.reticleGroup.visible) {
-        this.reticleGroup.position.copy(surfaceHit.position);
+      if (!this.isPlaced) {
+        this.reticleGroup.position.copy(intersection.position);
         this.reticleGroup.visible = true;
-      } else {
-        // Smooth 60fps lerp towards detected surface point
-        this.reticleGroup.position.lerp(surfaceHit.position, 0.25);
+        this.notifyPlacementState(true, 'Đặt sản phẩm trên mặt sàn');
       }
-
-      this.notifyPlacementState(true, 'Đặt sản phẩm tại đây');
     } else {
-      this.hasSurface = false;
-      if (this.reticleGroup.visible) {
-        this.reticleGroup.visible = false;
-      }
-      this.notifyPlacementState(false, this.currentGuidance);
+      this.hasPreviewIntersection = false;
+      this.hasPreviewPosition = false;
+      this.reticleGroup.visible = false;
+      if (!this.isPlaced) this.notifyPlacementState(false, this.currentGuidance);
     }
   }
 
-  private detectSurface(): SurfaceHit | null {
+  private invalidatePreview(): void {
+    this.hasPreviewIntersection = false;
+    this.hasPreviewPosition = false;
+    this.hasCameraSample = false;
+    this.stableTrackingSeconds = 0;
+    this.reticleGroup.visible = false;
+    if (this.canPlace) this.notifyPlacementState(false, 'Giữ camera ổn định trên mặt sàn');
+  }
+
+  private projectGroundPlane(dt: number): PreviewIntersection | null {
     if (!this.camera) return null;
-
-    // 1. Real 8th Wall AR Mode
-    if (!this.isSimulation) {
-      const camPos = new THREE.Vector3();
-      const camDir = new THREE.Vector3();
-      this.camera.getWorldPosition(camPos);
-      this.camera.getWorldDirection(camDir);
-
-      // Check 1: Must be looking downward towards ground/surface (pitch < -0.05, at least ~3° downward tilt).
-      // Reject if pointing horizontally at walls or upwards at ceiling.
-      if (camDir.y >= -0.05) {
-        this.cameraPitchTooHigh = true;
-        this.currentGuidance = 'Nghiêng camera xuống mặt bàn hoặc sàn';
-        return null;
-      }
-      this.cameraPitchTooHigh = false;
-
-      // Check 2: Sample 8th Wall SLAM Physical Hit-Testing on real environment surfaces
-      const XR8 = (window as any).XR8;
-      let rawHitPoint: THREE.Vector3 | null = null;
-      if (XR8?.XrController?.hitTest) {
-        try {
-          // 8th Wall hitTest takes normalized coordinates (0.5, 0.5) for screen center
-          let hits = XR8.XrController.hitTest(0.5, 0.5) || [];
-          if (!hits.length) {
-            hits = XR8.XrController.hitTest() || [];
-          }
-          if (!hits.length && typeof window !== 'undefined') {
-            hits = XR8.XrController.hitTest(window.innerWidth * 0.5, window.innerHeight * 0.5) || [];
-          }
-
-          if (hits && hits.length > 0) {
-            for (const hit of hits) {
-              if (!hit?.position) continue;
-              const px = hit.position.x;
-              const py = hit.position.y;
-              const pz = hit.position.z;
-              if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
-              // A real surface is physically below the camera level
-              if (py < camPos.y - 0.05) {
-                rawHitPoint = new THREE.Vector3(px, py, pz);
-                break;
-              }
-            }
-          }
-        } catch {
-          rawHitPoint = null;
-        }
-      }
-
-      // Check 3: Robust Plane Height Estimator with Outlier Rejection
-      if (rawHitPoint) {
-        if (!this.hasEstablishedPlane) {
-          // Initialize plane height from first physical SLAM surface hit
-          this.smoothedPlaneY = rawHitPoint.y;
-          this.hasEstablishedPlane = true;
-          this.candidateSampleCount = 0;
-        } else {
-          const deltaY = Math.abs(rawHitPoint.y - this.smoothedPlaneY);
-          if (deltaY <= 0.20) {
-            // Consistent with current surface: smooth filter to eliminate any jitter
-            this.smoothedPlaneY = THREE.MathUtils.lerp(this.smoothedPlaneY, rawHitPoint.y, 0.08);
-            this.candidateSampleCount = 0;
-          } else {
-            // New surface height candidate (e.g. user moved camera from desk to floor or vice-versa)
-            if (this.candidateSampleCount === 0 || Math.abs(rawHitPoint.y - this.candidatePlaneY) > 0.12) {
-              this.candidatePlaneY = rawHitPoint.y;
-              this.candidateSampleCount = 1;
-            } else {
-              this.candidateSampleCount++;
-              if (this.candidateSampleCount >= 5) {
-                // Verified consistent new surface: transition plane height smoothly
-                this.smoothedPlaneY = THREE.MathUtils.lerp(this.smoothedPlaneY, rawHitPoint.y, 0.25);
-                this.candidateSampleCount = 0;
-              }
-            }
-          }
-        }
-      }
-
-      // Fallback: If no SLAM hit and no plane established yet, default to 0.45m below camera (typical tabletop height)
-      if (!this.hasEstablishedPlane) {
-        this.smoothedPlaneY = camPos.y - 0.45;
-        this.hasEstablishedPlane = true;
-      }
-
-      const planeY = this.smoothedPlaneY;
-
-      if (camPos.y <= planeY + 0.05) {
-        this.currentGuidance = 'Nâng camera cao hơn mặt phẳng';
-        return null;
-      }
-
-      const rawT = (planeY - camPos.y) / camDir.y;
-      if (rawT < 0.15 || rawT > 4.0) {
-        this.currentGuidance = rawT > 4.0
-          ? 'Đưa camera lại gần mặt phẳng'
-          : 'Nâng camera cao hơn một chút';
-        return null;
-      }
-
-      const hitX = camPos.x + camDir.x * rawT;
-      const hitZ = camPos.z + camDir.z * rawT;
-      const hitPosition = new THREE.Vector3(hitX, planeY, hitZ);
-
-      this.lastHitDistance = rawT;
-      this.currentGuidance = 'Đặt sản phẩm tại đây';
-
-      return {
-        position: hitPosition,
-        normal: new THREE.Vector3(0, 1, 0),
-        distance: rawT,
-      };
-    }
-
-    // 2. Desktop Simulation Mode: Raycast against horizontal tabletop plane at Y = 0
     const camPos = new THREE.Vector3();
     const camDir = new THREE.Vector3();
     this.camera.getWorldPosition(camPos);
     this.camera.getWorldDirection(camDir);
 
-    if (camDir.y >= -0.05) {
-      this.cameraPitchTooHigh = true;
-      this.currentGuidance = 'Nghiêng camera xuống mặt bàn';
-      return null;
-    }
-    this.cameraPitchTooHigh = false;
-
-    const planeY = 0;
-    if (camPos.y > planeY) {
-      const rawT = (planeY - camPos.y) / camDir.y;
-      if (rawT > 0.1 && rawT < 10.0) {
-        this.lastHitDistance = rawT;
-        this.currentGuidance = 'Đặt sản phẩm tại đây';
-        return {
-          position: new THREE.Vector3(
-            camPos.x + camDir.x * rawT,
-            planeY,
-            camPos.z + camDir.z * rawT
-          ),
-          normal: new THREE.Vector3(0, 1, 0),
-          distance: rawT,
-        };
+    if (!this.isSimulation) {
+      if (this.worldTrackingStatus !== 'NORMAL') {
+        this.stableTrackingSeconds = 0;
+        this.hasCameraSample = false;
+        this.currentGuidance = 'Đợi World Tracking ổn định';
+        return null;
+      }
+      const camQuat = new THREE.Quaternion();
+      this.camera.getWorldQuaternion(camQuat);
+      if (this.hasCameraSample &&
+          (camPos.distanceTo(this.lastCameraPosition) > 0.4 ||
+           camQuat.angleTo(this.lastCameraQuaternion) > THREE.MathUtils.degToRad(35))) {
+        this.stableTrackingSeconds = 0;
+        this.hasPreviewPosition = false;
+      } else {
+        this.stableTrackingSeconds += dt;
+      }
+      this.lastCameraPosition.copy(camPos);
+      this.lastCameraQuaternion.copy(camQuat);
+      this.hasCameraSample = true;
+      if (this.stableTrackingSeconds < 0.35) {
+        this.currentGuidance = 'Giữ camera ổn định trên mặt sàn';
+        return null;
       }
     }
-    this.currentGuidance = 'Lia camera tới mặt phẳng bàn';
-    return null;
+
+    if (camDir.y >= -0.05) {
+      this.currentGuidance = 'Nghiêng camera xuống mặt sàn';
+      return null;
+    }
+    const planeY = this.planeY;
+    if (camPos.y <= planeY) {
+      this.currentGuidance = 'Camera cần ở cao hơn mặt sàn';
+      return null;
+    }
+    const rayDistance = (planeY - camPos.y) / camDir.y;
+    if (!Number.isFinite(rayDistance) || rayDistance <= 0) return null;
+
+    const rawPosition = new THREE.Vector3(
+      camPos.x + camDir.x * rayDistance,
+      planeY,
+      camPos.z + camDir.z * rayDistance
+    );
+    if (this.hasPreviewPosition && rawPosition.distanceTo(this.previewPosition) > 0.75) {
+      this.stableTrackingSeconds = 0;
+      this.hasPreviewPosition = false;
+      this.currentGuidance = 'Giữ camera ổn định để cập nhật lưới';
+      return null;
+    }
+    if (!this.hasPreviewPosition) {
+      this.previewPosition.copy(rawPosition);
+      this.hasPreviewPosition = true;
+    } else {
+      this.previewPosition.lerp(rawPosition, 1 - Math.exp(-dt / 0.12));
+      this.previewPosition.y = planeY;
+    }
+    this.currentGuidance = 'Đặt sản phẩm trên mặt sàn';
+    return { position: this.previewPosition };
   }
 
   /**
-   * Places product onto the detected surface, unlocks camera, and transitions to World Tracking.
+   * Places product on the XR8 ground reference and transitions to World Tracking.
    */
   public placeProduct(): boolean {
     if (!this.productRoot || !this.camera || !this.worldAnchorGroup) return false;
-    if (!this.hasSurface && !this.reticleGroup.visible) return false;
+    if (this.isPlaced || !this.canPlace || !this.hasPreviewIntersection) return false;
 
-    // Destination target is current reticle position on the surface in world coordinates
+    // Destination is the current reticle position in world coordinates.
     this.animEndPos.copy(this.reticleGroup.position);
 
     // Orient product so front faces the user camera (yaw only around Y-axis)
@@ -505,10 +372,10 @@ export class SurfacePlacementController {
       this.animEndQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), camEuler.y);
     }
 
-    // Target scale in world space: fixed real-world height of exactly 20cm (0.20m)
+    // Target scale in world space: 30 cm, 1.5x the previous placed size.
     const placedScale = this.normalizedModelHeight > 0
       ? SurfacePlacementController.TARGET_PLACED_HEIGHT_METERS / this.normalizedModelHeight
-      : 0.3267;
+      : 0.4901;
     this.animEndScale.set(placedScale, placedScale, placedScale);
 
     // Disable frustum culling on all child meshes so model never vanishes when camera gets close

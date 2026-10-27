@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:surface": "node tests/run-surface-test.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

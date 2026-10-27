@@ -147,6 +147,8 @@ Mở `src/data/ingredients.ts` và chỉnh sửa hoặc thêm mới vào mảng 
 
 ## 6. Báo Cáo Kiểm Thử
 
+Chi tiết giới hạn single-plane của XR8, reticle dùng mốc sàn và lưới đã ẩn: [Surface Tracking](docs/surface-tracking.md).
+
 | Hạng mục | Trạng thái | Ghi chú |
 | :--- | :---: | :--- |
 | **Cài đặt & Build Vite** | **ĐẠT** | `tsc --noEmit` & `npm run build` chạy thành công không cảnh báo lỗi |

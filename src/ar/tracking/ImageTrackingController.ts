@@ -1093,7 +1093,7 @@ export class ImageTrackingController {
 
     if (aspect < 1.0) {
       // Mobile portrait mode:
-      // Harmonized scale matching the 20cm placed product viewed at comfortable tabletop distance (~0.70m)
+      // Camera-locked hero size, independent of the final world placement scale.
       const baseScale = 0.52;
       const scaleMultiplier = Math.min(1.0, Math.max(0.85, aspect / 0.52));
       const s = baseScale * scaleMultiplier;

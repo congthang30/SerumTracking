@@ -11,7 +11,6 @@ import { SurfacePlacementController } from '../ar/tracking/SurfacePlacementContr
 import { beginARTraceSession, traceAR } from '../ar/xr/camera-fix';
 import { DEBUG_AR_PERF, worldTrackingDebugger } from '../ar/debug/WorldTrackingDebugger';
 import { arPerformanceMonitor } from '../ar/debug/ARPerformanceMonitor';
-import { arTrackingDiagnostics } from '../ar/debug/ARTrackingDiagnostics';
 
 export interface UseAREngineReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -35,12 +34,7 @@ export interface UseAREngineReturn {
   placeOnSurface: () => void;
   relockToCamera: () => void;
   worldTrackingStatus: 'NORMAL' | 'LIMITED' | 'SIMULATION';
-  isPlaneGridVisible: boolean;
-  togglePlaneGrid: () => void;
-  toggleTrackingMode: () => void;
-  trackingMode: 'CAMERA_ATTACHED' | 'WORLD_ANCHORED';
   surfaceGuidance: string;
-  adjustPlaneY: (deltaMeters: number) => void;
 }
 
 function isMobileDevice(): boolean {
@@ -91,8 +85,7 @@ export function useAREngine(): UseAREngineReturn {
   const [worldTrackingStatus, setWorldTrackingStatus] = useState<'NORMAL' | 'LIMITED' | 'SIMULATION'>(
     isSimulation ? 'SIMULATION' : 'LIMITED'
   );
-  const [isPlaneGridVisible, setIsPlaneGridVisible] = useState(false);
-  const [surfaceGuidance, setSurfaceGuidance] = useState('Lia camera tới mặt phẳng (bàn hoặc sàn)');
+  const [surfaceGuidance, setSurfaceGuidance] = useState('Giữ camera ổn định trên mặt sàn');
 
   // Engine references kept outside React state for 60fps performance
   const sceneRef = useRef<SerumScene | null>(null);
@@ -163,29 +156,6 @@ export function useAREngine(): UseAREngineReturn {
     trackingRef.current?.relockCamera();
     setIsCameraLocked(true);
   }, []);
-
-  const togglePlaneGrid = useCallback(() => {
-    setIsPlaneGridVisible((prev) => {
-      const next = !prev;
-      sceneRef.current?.setPlaneGridVisible(next);
-      arTrackingDiagnostics.setPlaneGridVisible(next);
-      return next;
-    });
-  }, []);
-
-  const toggleTrackingMode = useCallback(() => {
-    if (isCameraLocked) {
-      if (surfacePlacementRef.current?.placeProduct()) {
-        trackingRef.current?.unlockCamera();
-        setIsCameraLocked(false);
-        setCanPlaceOnSurface(false);
-      }
-    } else {
-      surfacePlacementRef.current?.relockToCamera();
-      trackingRef.current?.relockCamera();
-      setIsCameraLocked(true);
-    }
-  }, [isCameraLocked]);
 
   const replaySequence = useCallback(() => {
     if (!modelAnimationStartedRef.current) return;
@@ -287,7 +257,7 @@ export function useAREngine(): UseAREngineReturn {
         canvas
       );
 
-      // Initialize surface placement controller for plane detection and world tracking handoff
+      // Use XR8's single ground reference for floor placement.
       surfacePlacementRef.current = new SurfacePlacementController(
         serumScene.scene,
         serumScene.camera,
@@ -397,7 +367,7 @@ export function useAREngine(): UseAREngineReturn {
           startModelAnimation();
           timelineRef.current?.start();
           manager.disableImageTargets();
-          surfacePlacementRef.current?.setTargetFound(true, pose.position);
+          surfacePlacementRef.current?.setTargetFound(true);
           setHasTargetFound(true);
         }
       },
@@ -405,7 +375,7 @@ export function useAREngine(): UseAREngineReturn {
         const anchoredNow = trackingRef.current?.handleImageUpdated(pose, 0) ?? false;
         if (anchoredNow) {
           manager.disableImageTargets();
-          surfacePlacementRef.current?.setTargetFound(true, pose.position);
+          surfacePlacementRef.current?.setTargetFound(true);
           setHasTargetFound(true);
         }
       },
@@ -414,7 +384,6 @@ export function useAREngine(): UseAREngineReturn {
         worldTrackingDebugger.recordTrackingStatus(status, reason ?? 'UNDEFINED');
         trackingRef.current?.setWorldTrackingStatus(status, reason);
         surfacePlacementRef.current?.setTrackingStatus(status, reason ?? 'UNDEFINED');
-        arTrackingDiagnostics.recordTrackingStatus(status, reason ?? 'UNDEFINED');
         setWorldTrackingStatus(status);
       },
       onPipelineState: (state) => worldTrackingDebugger.recordPipelineState(state),
@@ -464,26 +433,15 @@ export function useAREngine(): UseAREngineReturn {
     surfacePlacementRef.current?.update(safeDt);
     const scene = sceneRef.current;
 
-    // Keep 3D Plane Grid aligned with the real detected surface position (X, Y, Z)
+    // Keep the ground grid hidden while retaining the placement reticle.
     if (scene && surfacePlacementRef.current) {
-      const p = surfacePlacementRef.current.currentSurfacePosition;
-      scene.setPlaneGridPosition(p.x, p.y, p.z);
+      const surface = surfacePlacementRef.current;
+      if (surface.hasStablePreview) {
+        const p = surface.currentSurfacePosition;
+        scene.setPlaneGridPosition(p.x, p.y, p.z);
+      }
+      scene.setPlaneGridVisible(false);
     }
-
-    // Zero-overhead sampling for AR 6DoF Diagnostics HUD
-    arTrackingDiagnostics.updateFrame({
-      dt: safeDt,
-      camera: scene?.camera ?? null,
-      productRoot: scene?.productRoot ?? null,
-      canvas: canvasRef.current,
-      trackingMode: isCameraLocked ? 'CAMERA_ATTACHED' : 'WORLD_ANCHORED',
-      imageTargetState: trackingRef.current?.trackingState ?? 'SCANNING',
-      planeY: surfacePlacementRef.current?.planeY ?? 0,
-      isPlaneCalibrated: surfacePlacementRef.current?.isPlaneCalibrated ?? false,
-      hitDistanceM: surfacePlacementRef.current?.hitDistance ?? 0,
-      planeGridVisible: isPlaneGridVisible,
-      isSimulation,
-    });
     const debugStoryBefore = worldTrackingDebugger.captureTransform(scene?.userRotationGroup);
     const debugBottleBefore = worldTrackingDebugger.captureTransform(modelRef.current?.bottleGroup);
     const debugModelBefore = worldTrackingDebugger.captureTransform(modelRef.current?.modelScene);
@@ -765,7 +723,7 @@ export function useAREngine(): UseAREngineReturn {
         return;
       }
 
-      // Tap on canvas/surface to place product when surface is detected
+      // Tap to place product when the ground reticle is ready.
       if (isCameraLocked && canPlaceOnSurface) {
         placeOnSurface();
       }
@@ -851,13 +809,6 @@ export function useAREngine(): UseAREngineReturn {
     placeOnSurface,
     relockToCamera,
     worldTrackingStatus,
-    isPlaneGridVisible,
-    togglePlaneGrid,
-    toggleTrackingMode,
-    trackingMode: isCameraLocked ? 'CAMERA_ATTACHED' : 'WORLD_ANCHORED',
     surfaceGuidance,
-    adjustPlaneY: (deltaMeters: number) => {
-      surfacePlacementRef.current?.adjustPlaneY(deltaMeters);
-    },
   };
 }

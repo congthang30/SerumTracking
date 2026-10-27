@@ -108,7 +108,7 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
 
   return (
     <>
-      {/* 1. Camera-Locked Mode: Placement Button or Surface Detection Guidance */}
+      {/* 1. Camera-Locked Mode: Placement Button or tracking guidance */}
       {isCameraLocked && (
         <div className="surface-placement-container interactive-ui">
           {canPlaceOnSurface ? (
@@ -131,7 +131,7 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
               <span className="guidance-text">
                 {guidanceText || (trackingStatus === 'LIMITED'
                   ? 'Đang ổn định SLAM camera...'
-                  : 'Lia camera tới mặt phẳng (bàn hoặc sàn)')}
+                  : 'Lia camera xuống sàn')}
               </span>
             </div>
           )}
