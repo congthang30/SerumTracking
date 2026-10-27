@@ -5,6 +5,7 @@ export interface SurfacePlacementOverlayProps {
   isCameraLocked: boolean;
   canPlaceOnSurface: boolean;
   trackingStatus?: 'NORMAL' | 'LIMITED' | 'SIMULATION';
+  guidanceText?: string;
   onPlace: () => void;
   onRelock?: () => void;
 }
@@ -84,6 +85,7 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
   isCameraLocked,
   canPlaceOnSurface,
   trackingStatus = 'NORMAL',
+  guidanceText,
   onPlace,
   onRelock,
 }) => {
@@ -127,9 +129,9 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
               </span>
               <span className={`guidance-dot ${trackingStatus === 'LIMITED' ? 'warning' : ''}`} />
               <span className="guidance-text">
-                {trackingStatus === 'LIMITED'
+                {guidanceText || (trackingStatus === 'LIMITED'
                   ? 'Đang ổn định SLAM camera...'
-                  : 'Lia camera tới mặt phẳng (bàn hoặc sàn)'}
+                  : 'Lia camera tới mặt phẳng (bàn hoặc sàn)')}
               </span>
             </div>
           )}

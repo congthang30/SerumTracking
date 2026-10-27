@@ -39,6 +39,7 @@ export interface UseAREngineReturn {
   togglePlaneGrid: () => void;
   toggleTrackingMode: () => void;
   trackingMode: 'CAMERA_ATTACHED' | 'WORLD_ANCHORED';
+  surfaceGuidance: string;
 }
 
 function isMobileDevice(): boolean {
@@ -90,6 +91,7 @@ export function useAREngine(): UseAREngineReturn {
     isSimulation ? 'SIMULATION' : 'LIMITED'
   );
   const [isPlaneGridVisible, setIsPlaneGridVisible] = useState(false);
+  const [surfaceGuidance, setSurfaceGuidance] = useState('Lia camera tới mặt phẳng (bàn hoặc sàn)');
 
   // Engine references kept outside React state for 60fps performance
   const sceneRef = useRef<SerumScene | null>(null);
@@ -294,9 +296,10 @@ export function useAREngine(): UseAREngineReturn {
         loadedModel.normalizedSize.x,
         loadedModel.normalizedSize.y
       );
-      surfacePlacementRef.current.onPlacementChanged = (isPlaced, canPlace) => {
+      surfacePlacementRef.current.onPlacementChanged = (isPlaced, canPlace, guidance) => {
         setIsCameraLocked(!isPlaced);
         setCanPlaceOnSurface(canPlace);
+        if (guidance) setSurfaceGuidance(guidance);
       };
       surfacePlacementRef.current.onPlacementSettled = (placedMatrix) => {
         trackingRef.current?.notifyPlacementSettled(placedMatrix);
@@ -850,5 +853,6 @@ export function useAREngine(): UseAREngineReturn {
     togglePlaneGrid,
     toggleTrackingMode,
     trackingMode: isCameraLocked ? 'CAMERA_ATTACHED' : 'WORLD_ANCHORED',
+    surfaceGuidance,
   };
 }

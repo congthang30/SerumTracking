@@ -18,6 +18,7 @@ export const App: React.FC = () => {
     placeOnSurface,
     relockToCamera,
     worldTrackingStatus,
+    surfaceGuidance,
     isPlaneGridVisible,
     togglePlaneGrid,
     toggleTrackingMode,
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
         hasTargetFound={hasTargetFound}
         isCameraLocked={isCameraLocked}
         canPlaceOnSurface={canPlaceOnSurface}
+        guidanceText={surfaceGuidance}
         trackingStatus={worldTrackingStatus}
         onPlace={placeOnSurface}
         onRelock={relockToCamera}
