@@ -23,6 +23,7 @@ export const App: React.FC = () => {
     togglePlaneGrid,
     toggleTrackingMode,
     trackingMode,
+    adjustPlaneY,
   } = useAREngine();
 
   return (
@@ -54,6 +55,7 @@ export const App: React.FC = () => {
         onTogglePlaneGrid={togglePlaneGrid}
         trackingMode={trackingMode}
         onToggleTrackingMode={toggleTrackingMode}
+        onAdjustPlaneY={adjustPlaneY}
       />
     </>
   );

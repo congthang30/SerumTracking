@@ -4,6 +4,7 @@ import { arTrackingDiagnostics, ARDiagnosticsData } from '../ar/debug/ARTracking
 export interface ARTrackingDebugHUDProps {
   onTogglePlaneGrid?: () => void;
   onToggleTrackingMode?: () => void;
+  onAdjustPlaneY?: (deltaMeters: number) => void;
   isPlaneGridVisible?: boolean;
   trackingMode?: 'CAMERA_ATTACHED' | 'WORLD_ANCHORED';
 }
@@ -11,6 +12,7 @@ export interface ARTrackingDebugHUDProps {
 export const ARTrackingDebugHUD: React.FC<ARTrackingDebugHUDProps> = ({
   onTogglePlaneGrid,
   onToggleTrackingMode,
+  onAdjustPlaneY,
   isPlaneGridVisible = false,
   trackingMode = 'CAMERA_ATTACHED',
 }) => {
@@ -150,6 +152,24 @@ export const ARTrackingDebugHUD: React.FC<ARTrackingDebugHUDProps> = ({
                 <span className="ar-debug-sublabel">Hit Distance:</span>
                 <span className="ar-debug-val">{data.hitDistanceM.toFixed(2)} m</span>
               </div>
+              {onAdjustPlaneY && (
+                <div className="ar-debug-subrow" style={{ marginTop: '6px', display: 'flex', gap: '6px' }}>
+                  <button
+                    className="ar-debug-action-btn"
+                    style={{ padding: '4px 8px', fontSize: '11px', flex: 1 }}
+                    onClick={() => onAdjustPlaneY(-0.05)}
+                  >
+                    ⬇️ Hạ 5cm
+                  </button>
+                  <button
+                    className="ar-debug-action-btn"
+                    style={{ padding: '4px 8px', fontSize: '11px', flex: 1 }}
+                    onClick={() => onAdjustPlaneY(0.05)}
+                  >
+                    ⬆️ Nâng 5cm
+                  </button>
+                </div>
+              )}
               {onTogglePlaneGrid && (
                 <button
                   className={`ar-debug-action-btn grid-btn ${isPlaneGridVisible ? 'active' : ''}`}

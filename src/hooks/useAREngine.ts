@@ -40,6 +40,7 @@ export interface UseAREngineReturn {
   toggleTrackingMode: () => void;
   trackingMode: 'CAMERA_ATTACHED' | 'WORLD_ANCHORED';
   surfaceGuidance: string;
+  adjustPlaneY: (deltaMeters: number) => void;
 }
 
 function isMobileDevice(): boolean {
@@ -855,5 +856,8 @@ export function useAREngine(): UseAREngineReturn {
     toggleTrackingMode,
     trackingMode: isCameraLocked ? 'CAMERA_ATTACHED' : 'WORLD_ANCHORED',
     surfaceGuidance,
+    adjustPlaneY: (deltaMeters: number) => {
+      surfacePlacementRef.current?.adjustPlaneY(deltaMeters);
+    },
   };
 }
