@@ -41,6 +41,8 @@ export class SurfacePlacementController {
   private cameraPitchTooHigh = false;
   private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
   private worldTrackingReason = 'INITIALIZING';
+  private currentGuidance = 'Lia camera tới mặt phẳng bàn';
+  private lastReportedGuidance = '';
 
   // Placement glide animation
   private isAnimatingPlacement = false;
@@ -79,6 +81,16 @@ export class SurfacePlacementController {
     this.scene.add(this.reticleGroup);
   }
 
+  private notifyPlacementState(canPlace: boolean, guidance: string): void {
+    const stateChanged = this.canPlace !== canPlace;
+    const guidanceChanged = this.lastReportedGuidance !== guidance;
+    if (stateChanged || guidanceChanged) {
+      this.canPlace = canPlace;
+      this.lastReportedGuidance = guidance;
+      this.onPlacementChanged?.(this.isPlaced, canPlace, guidance);
+    }
+  }
+
   public setTargetFound(found: boolean, initialPosePosition?: THREE.Vector3): void {
     this.isTargetFound = found;
     if (found) {
@@ -93,27 +105,20 @@ export class SurfacePlacementController {
           this.reticleGroup.visible = true;
         }
         this.hasSurface = true;
-        this.canPlace = true;
-        this.onPlacementChanged?.(this.isPlaced, true);
+        this.notifyPlacementState(true, 'Đặt sản phẩm tại đây');
       }
     } else {
-      this.canPlace = false;
       this.hasSurface = false;
       if (this.reticleGroup) {
         this.reticleGroup.visible = false;
       }
+      this.notifyPlacementState(false, 'Lia camera tới mục tiêu');
     }
   }
 
   public setTrackingStatus(status: 'NORMAL' | 'LIMITED', reason = 'UNDEFINED'): void {
     this.worldTrackingStatus = status;
     this.worldTrackingReason = reason;
-    if (status === 'LIMITED' && !this.isSimulation) {
-      if (this.canPlace) {
-        this.canPlace = false;
-        this.onPlacementChanged?.(this.isPlaced, false);
-      }
-    }
   }
 
   public get trackingStatusInfo(): { status: 'NORMAL' | 'LIMITED'; reason: string } {
@@ -278,17 +283,11 @@ export class SurfacePlacementController {
       return;
     }
 
-    // Only detect surfaces and allow placement if SLAM world tracking is sufficiently stable
-    const isTrackingStable = this.isSimulation || this.worldTrackingStatus === 'NORMAL';
-    if (!isTrackingStable) {
+    // 6DoF World Tracking check
+    if (!this.isSimulation && !this.camera) {
       this.hasSurface = false;
-      if (this.reticleGroup.visible) {
-        this.reticleGroup.visible = false;
-      }
-      if (this.canPlace) {
-        this.canPlace = false;
-        this.onPlacementChanged?.(this.isPlaced, false, 'Đang ổn định SLAM camera...');
-      }
+      if (this.reticleGroup.visible) this.reticleGroup.visible = false;
+      this.notifyPlacementState(false, 'Đang khởi động camera...');
       return;
     }
 
@@ -306,22 +305,13 @@ export class SurfacePlacementController {
         this.reticleGroup.position.lerp(surfaceHit.position, 0.25);
       }
 
-      if (!this.canPlace) {
-        this.canPlace = true;
-        this.onPlacementChanged?.(this.isPlaced, true, 'Đặt sản phẩm tại đây');
-      }
+      this.notifyPlacementState(true, 'Đặt sản phẩm tại đây');
     } else {
       this.hasSurface = false;
       if (this.reticleGroup.visible) {
         this.reticleGroup.visible = false;
       }
-      if (this.canPlace) {
-        this.canPlace = false;
-        const guidance = this.cameraPitchTooHigh
-          ? 'Nghiêng camera xuống mặt bàn'
-          : 'Lia camera tới mặt phẳng (bàn hoặc sàn)';
-        this.onPlacementChanged?.(this.isPlaced, false, guidance);
-      }
+      this.notifyPlacementState(false, this.currentGuidance);
     }
   }
 
@@ -335,122 +325,96 @@ export class SurfacePlacementController {
       this.camera.getWorldPosition(camPos);
       this.camera.getWorldDirection(camDir);
 
-      // Condition 1: Camera must be angled downward towards the table (pitch < -0.15, at least ~9° downward tilt).
-      // If the user points horizontally at walls, across the room, or up at the ceiling, REJECT immediately!
-      if (camDir.y > -0.15) {
+      // Check 1: Camera must be tilted downward towards the table (pitch < -0.05, at least ~3° downward tilt).
+      // If pointing horizontally at walls or upwards at the ceiling, REJECT!
+      if (camDir.y >= -0.05) {
         this.cameraPitchTooHigh = true;
+        this.currentGuidance = 'Nghiêng camera xuống mặt bàn';
         return null;
       }
       this.cameraPitchTooHigh = false;
 
-      // Condition 2: 8th Wall Hit-Testing for actual physical geometry.
-      // If 8th Wall finds no surface/features in the center of the camera view, REJECT!
-      const XR8 = (window as any).XR8;
-      if (!XR8?.XrController?.hitTest) {
+      // Table ground plane height (calibrated from target poster)
+      const planeY = this.hasCalibratedPlane ? this.lastPlaneY : 0;
+
+      // Check 2: Camera must be physically above the tabletop
+      if (camPos.y <= planeY + 0.05) {
+        this.currentGuidance = 'Nâng camera cao hơn mặt bàn';
         return null;
       }
 
-      let validHit: { position: THREE.Vector3; distance: number; isPlane: boolean } | null = null;
-      try {
-        const hits = XR8.XrController.hitTest(0.5, 0.5, ['DETECTED_SURFACE', 'ESTIMATED_SURFACE', 'FEATURE_POINT']);
-        if (!hits || hits.length === 0) {
-          // Zero hits in raycast direction: camera is aiming at empty air or a textureless void
+      // Check 3: Raycast intersection distance along camera direction ray to plane Y = planeY
+      const rawT = (planeY - camPos.y) / camDir.y;
+      if (rawT < 0.25 || rawT > 1.80) {
+        // Raycast intersects too far away across the room or too close to lens
+        this.currentGuidance = rawT > 1.80
+          ? 'Đưa camera lại gần mặt bàn'
+          : 'Lùi camera ra xa mặt bàn một chút';
+        return null;
+      }
+
+      // Check 4: Table workspace boundary check (must be within realistic reach of the scanned poster on table)
+      const candidateHitX = camPos.x + camDir.x * rawT;
+      const candidateHitZ = camPos.z + camDir.z * rawT;
+      if (this.initialPosterPosition) {
+        const dx = candidateHitX - this.initialPosterPosition.x;
+        const dz = candidateHitZ - this.initialPosterPosition.z;
+        const distFromPoster = Math.sqrt(dx * dx + dz * dz);
+        if (distFromPoster > 1.50) {
+          // Camera is aimed off the table onto distant room floor or out of workspace
+          this.currentGuidance = 'Lia camera lại khu vực bàn';
           return null;
         }
+      }
 
-        for (const hit of hits) {
-          if (!hit?.position) continue;
-          const px = hit.position.x;
-          const py = hit.position.y;
-          const pz = hit.position.z;
-          if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
-          const dist = typeof hit.distance === 'number' ? hit.distance : 1.0;
-
-          // Reject hits that are outside plausible tabletop range
-          if (dist < 0.35 || dist > 1.80) continue;
-
-          // Check surface normal if this hit is a plane
-          if (hit.rotation && (hit.type === 'DETECTED_SURFACE' || hit.type === 'ESTIMATED_SURFACE')) {
-            const rot = hit.rotation;
-            const q = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
-            const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-            // Must be a horizontal flat plane (normal pointing upwards, tilt < 45°)
-            if (Math.abs(normal.y) < 0.70) {
-              continue; // Vertical wall or steep slope; reject!
-            }
-            validHit = {
-              position: new THREE.Vector3(px, py, pz),
-              distance: dist,
-              isPlane: true,
-            };
-            break;
+      // Check 5: 8th Wall SLAM Point Cloud Check (Wall & Obstacle Rejection)
+      const XR8 = (window as any).XR8;
+      if (XR8?.XrController?.hitTest) {
+        try {
+          const centerX = typeof window !== 'undefined' ? window.innerWidth * 0.5 : 0;
+          const centerY = typeof window !== 'undefined' ? window.innerHeight * 0.5 : 0;
+          let hits = XR8.XrController.hitTest(centerX, centerY, ['FEATURE_POINT']);
+          if (!hits || hits.length === 0) {
+            hits = XR8.XrController.hitTest();
           }
 
-          // For FEATURE_POINT:
-          // Must lie below camera level and near the calibrated tabletop plane height
-          if (py < camPos.y) {
-            if (this.hasCalibratedPlane) {
-              // Only accept feature points within 18cm of the calibrated table height
-              if (Math.abs(py - this.lastPlaneY) <= 0.18) {
-                validHit = {
-                  position: new THREE.Vector3(px, py, pz),
-                  distance: dist,
-                  isPlane: false,
-                };
-                break;
+          if (hits && hits.length > 0) {
+            for (const hit of hits) {
+              if (!hit?.position) continue;
+              const px = hit.position.x;
+              const py = hit.position.y;
+              const pz = hit.position.z;
+              if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
+
+              const hitPoint = new THREE.Vector3(px, py, pz);
+              const distFromCam = camPos.distanceTo(hitPoint);
+
+              // Reject if an obstacle/wall is standing in front of the camera above table height
+              if (py > planeY + 0.25 && distFromCam < rawT - 0.15) {
+                this.currentGuidance = 'Hướng camera vào mặt phẳng bàn';
+                return null;
               }
-            } else {
-              // If not yet calibrated by poster, accept if within typical desk height below camera (0.20m to 1.10m)
-              const depthBelowCam = camPos.y - py;
-              if (depthBelowCam >= 0.20 && depthBelowCam <= 1.10) {
-                validHit = {
-                  position: new THREE.Vector3(px, py, pz),
-                  distance: dist,
-                  isPlane: false,
-                };
-                break;
+
+              // Refine plane height if SLAM feature points match tabletop height closely
+              if (Math.abs(py - planeY) < 0.10 && distFromCam >= 0.35 && distFromCam <= 1.50) {
+                this.lastPlaneY = THREE.MathUtils.lerp(this.lastPlaneY, py, 0.04);
               }
             }
           }
+        } catch {
+          // Fall through gracefully if hitTest is unsupported
         }
-      } catch {
-        return null;
       }
 
-      // If no hit passed the horizontal flat surface criteria, REJECT!
-      if (!validHit) {
-        return null;
-      }
-
-      // Refine plane height if valid hit is confirmed
-      if (!this.hasCalibratedPlane) {
-        this.lastPlaneY = validHit.position.y;
-        this.hasCalibratedPlane = true;
-      } else if (Math.abs(validHit.position.y - this.lastPlaneY) < 0.12) {
-        this.lastPlaneY = THREE.MathUtils.lerp(this.lastPlaneY, validHit.position.y, 0.06);
-      }
-
-      const planeY = this.lastPlaneY;
-      if (camPos.y <= planeY) {
-        return null;
-      }
-
-      // Calculate intersection distance along camera ray to reach table plane
-      const rawT = (planeY - camPos.y) / camDir.y;
-
-      // Consistency check: raycast intersection distance must roughly align with 8th Wall's physical hit distance
-      if (Math.abs(rawT - validHit.distance) > 0.45) {
-        return null;
-      }
-
-      // Strictly clamp distance to the golden tabletop range: 0.60m to 0.85m
-      const clampedT = Math.min(0.85, Math.max(0.60, rawT));
+      // Clamp distance to comfortable golden placement range (0.55m to 0.85m)
+      const clampedT = Math.min(0.85, Math.max(0.55, rawT));
       this.lastHitDistance = clampedT;
+      this.currentGuidance = 'Đặt sản phẩm tại đây';
 
       return {
         position: new THREE.Vector3(
           camPos.x + camDir.x * clampedT,
-          planeY,
+          this.lastPlaneY,
           camPos.z + camDir.z * clampedT
         ),
         normal: new THREE.Vector3(0, 1, 0),
@@ -465,8 +429,9 @@ export class SurfacePlacementController {
     this.camera.getWorldDirection(camDir);
 
     // In simulation mode, only accept when looking downward towards the tabletop
-    if (camDir.y > -0.08) {
+    if (camDir.y > -0.05) {
       this.cameraPitchTooHigh = true;
+      this.currentGuidance = 'Nghiêng camera xuống mặt bàn';
       return null;
     }
     this.cameraPitchTooHigh = false;
@@ -478,6 +443,7 @@ export class SurfacePlacementController {
         // Clamp distance in simulation mode to comfortable tabletop range (0.65m - 0.85m)
         const t = Math.min(0.85, Math.max(0.65, rawT));
         this.lastHitDistance = t;
+        this.currentGuidance = 'Đặt sản phẩm tại đây';
         return {
           position: new THREE.Vector3(
             camPos.x + camDir.x * t,
@@ -489,7 +455,7 @@ export class SurfacePlacementController {
         };
       }
     }
-
+    this.currentGuidance = 'Lia camera tới mặt phẳng bàn';
     return null;
   }
 
