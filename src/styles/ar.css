@@ -302,6 +302,10 @@
   animation: surfaceContainerFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.surface-placement-container.capture-active {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 128px);
+}
+
 @keyframes surfaceContainerFadeIn {
   from {
     opacity: 0;
@@ -505,7 +509,7 @@
   margin-top: 1px;
 }
 
-/* Spatial Glassmorphism Control Capsule: "Đổi vị trí" */
+/* Spatial Glassmorphism Control Capsule: "Reposition" */
 .surface-reposition-container {
   position: fixed;
   bottom: 34px;
@@ -514,6 +518,10 @@
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.surface-reposition-container.capture-active {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 128px);
 }
 
 .surface-reposition-btn {

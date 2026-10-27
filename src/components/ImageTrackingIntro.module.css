@@ -1,0 +1,286 @@
+.cameraIntro,
+.cameraLoadingScreen {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+  padding: max(24px, env(safe-area-inset-top)) 26px max(22px, env(safe-area-inset-bottom));
+  color: #fff;
+  text-align: center;
+  background: #062449;
+  isolation: isolate;
+}
+
+.cameraIntro {
+  z-index: 2;
+  grid-template-rows: auto 1fr auto;
+}
+
+.cameraLoadingScreen {
+  z-index: 1;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+}
+
+.cameraIntro::before,
+.cameraIntro::after,
+.cameraLoadingScreen::before,
+.cameraLoadingScreen::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: '';
+}
+
+.cameraIntro::before,
+.cameraLoadingScreen::before {
+  background-image: url('/img/image_tracking_phone_background.png');
+  background-position: center;
+  background-size: cover;
+  transform: scale(1.02);
+}
+
+.cameraIntro::after {
+  background:
+    linear-gradient(180deg, rgba(5, 27, 57, 0.2) 0%, rgba(5, 27, 57, 0.08) 37%, rgba(4, 23, 52, 0.34) 65%, rgba(2, 15, 34, 0.9) 100%),
+    linear-gradient(90deg, rgba(4, 21, 48, 0.14), transparent 56%, rgba(4, 21, 48, 0.14));
+}
+
+.cameraLoadingScreen::after {
+  z-index: -1;
+  background: linear-gradient(180deg, rgba(4, 22, 48, 0.54), rgba(2, 13, 31, 0.84));
+}
+
+.cameraIntroTop {
+  display: flex;
+  width: min(100%, 460px);
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 auto;
+}
+
+.cameraIntroTop > img,
+.cameraLoadingContent > img {
+  display: block;
+  width: 142px;
+  max-height: 44px;
+  object-fit: contain;
+  mix-blend-mode: screen;
+}
+
+.cameraIntroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  border: 1px solid rgba(76, 229, 193, 0.32);
+  border-radius: 999px;
+  background: rgba(6, 28, 54, 0.68);
+  color: #dafcf3;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.cameraIntroBadge > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #36e2b4;
+  box-shadow: 0 0 10px rgba(54, 226, 180, 0.85);
+}
+
+.cameraIntroTitle {
+  align-self: start;
+  width: min(100%, 460px);
+  margin: clamp(58px, 10vh, 92px) auto 0;
+  text-shadow: 0 3px 18px rgba(3, 20, 46, 0.38);
+}
+
+.cameraIntroTitle > p {
+  margin-bottom: 9px;
+  color: rgba(231, 246, 255, 0.9);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+}
+
+.cameraIntroTitle h1 {
+  color: #fff;
+  font-size: clamp(52px, 15vw, 76px);
+  font-weight: 750;
+  letter-spacing: -0.065em;
+  line-height: 0.98;
+}
+
+.cameraIntroTitle h1 span {
+  color: #46d3ff;
+}
+
+.cameraIntroTitle > strong {
+  display: block;
+  margin-top: 12px;
+  color: #e2f5ff;
+  font-size: 12px;
+  letter-spacing: 0.34em;
+}
+
+.cameraIntroTitle > small {
+  display: block;
+  margin-top: 11px;
+  color: rgba(226, 239, 255, 0.88);
+  font-size: 14px;
+}
+
+.cameraIntroActions {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 320px);
+  margin: 0 auto;
+}
+
+.cameraStartButton {
+  display: flex;
+  width: 291px;
+  max-width: 100%;
+  height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 10px 16px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  border-radius: 27px;
+  background: linear-gradient(105deg, #0c4fd8 0%, #3e68ed 52%, #70b8ff 100%);
+  box-shadow:
+    0 0 22px rgba(77, 150, 255, 0.48),
+    0 8px 24px rgba(0, 59, 191, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.46);
+  color: #fff;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  transition: filter 0.18s, transform 0.18s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cameraStartButton:hover {
+  filter: brightness(1.08);
+}
+
+.cameraStartButton:active {
+  transform: scale(0.985);
+}
+
+.cameraStartButton svg {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cameraIntroActions > p {
+  color: rgba(224, 239, 255, 0.76);
+  font-size: 11px;
+}
+
+.cameraLoadingContent {
+  display: flex;
+  width: min(100%, 360px);
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+}
+
+.cameraLoadingContent > img {
+  margin-bottom: 14px;
+}
+
+.cameraSpinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #5edcff;
+  border-radius: 50%;
+  animation: imageTrackingSpin 0.8s linear infinite;
+}
+
+.cameraLoadingContent > strong {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.cameraLoadingContent > p,
+.cameraStartupError > p {
+  max-width: 310px;
+  color: rgba(231, 241, 255, 0.84);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.cameraStartupError {
+  position: fixed;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(360px, calc(100vw - 40px));
+  padding: 26px 22px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(176, 221, 255, 0.34);
+  border-radius: 20px;
+  background: rgba(4, 20, 43, 0.9);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
+  color: #fff;
+  text-align: center;
+}
+
+.cameraStartupError > strong {
+  font-size: 16px;
+}
+
+.cameraStartupError > button {
+  margin-top: 3px;
+  padding: 10px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: #2679f4;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@keyframes imageTrackingSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-height: 690px) {
+  .cameraIntro {
+    padding-top: max(17px, env(safe-area-inset-top));
+    padding-bottom: max(15px, env(safe-area-inset-bottom));
+  }
+
+  .cameraIntroTitle {
+    margin-top: clamp(45px, 8vh, 62px);
+  }
+
+  .cameraIntroTitle h1 {
+    font-size: clamp(48px, 13vw, 66px);
+  }
+}

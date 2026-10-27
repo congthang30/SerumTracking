@@ -5,6 +5,7 @@ import { reportCameraDiagnostic, traceAR } from '../xr/camera-fix';
 import { logger } from '../../utils/logger';
 import { worldTrackingDebugger } from '../debug/WorldTrackingDebugger';
 import type { XR8FrameContext } from '../debug/WorldTrackingDebugger';
+import type { ARCaptureEngine } from '../../types/capture';
 
 // Expose THREE globally for 8th Wall's Threejs pipeline module
 (window as any).THREE = THREE;
@@ -23,6 +24,7 @@ export interface EightWallCallbacks {
     camera: THREE.Camera;
     renderer?: THREE.WebGLRenderer;
     runtimeVersion: string;
+    captureEngine: ARCaptureEngine | null;
   }) => void;
   onError: (message: string) => void;
   onProgress?: (stage: string) => void;
@@ -30,6 +32,7 @@ export interface EightWallCallbacks {
 
 const LOCAL_XR_URL = 'external/xr/xr.js';
 const CDN_XR_URL = 'https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1/dist/xr.js';
+const MAX_VIDEO_RECORDING_DURATION_MS = 60_000;
 const BUNDLED_XR_BUILD_ID = '1.657942';
 
 function loadScript(src: string): Promise<void> {
@@ -249,7 +252,7 @@ export class EightWallManager {
     }
 
     // Load Target JSON following flycam-logo targets loader pattern
-    cb.onProgress?.('Đang tải cấu hình Image Target...');
+    cb.onProgress?.('Loading image target configuration...');
     let imageTargetData: ImageTargetData[] = customTargetData || [];
     if (imageTargetData.length === 0) {
       try {
@@ -266,7 +269,7 @@ export class EightWallManager {
       }
     }
 
-    cb.onProgress?.('Cấu hình 8th Wall Image Tracking...');
+    cb.onProgress?.('Configuring 8th Wall image tracking...');
     try {
       XR8.XrController.configure({
         imageTargetData,
@@ -297,11 +300,18 @@ export class EightWallManager {
       scale: 'absolute',
     });
 
+    const hasCaptureModules = typeof XR8.CanvasScreenshot?.pipelineModule === 'function' &&
+      typeof XR8.MediaRecorder?.pipelineModule === 'function';
     const modules: any[] = [];
     try {
       modules.push(XR8.GlTextureRenderer.pipelineModule());
       modules.push(XR8.Threejs.pipelineModule());
       modules.push(XR8.XrController.pipelineModule());
+      if (hasCaptureModules) {
+        XR8.MediaRecorder.configure({ maxDurationMs: MAX_VIDEO_RECORDING_DURATION_MS });
+        modules.push(XR8.CanvasScreenshot.pipelineModule());
+        modules.push(XR8.MediaRecorder.pipelineModule());
+      }
       modules.push({
         name: 'serum-scene-updates',
         onUpdate: (context: XR8FrameContext) => cb.onFrameUpdate?.(context),
@@ -425,7 +435,7 @@ export class EightWallManager {
       };
 
       this.startupTimeoutTimer = window.setTimeout(() => {
-        failStart(new Error('Hết thời gian chờ camera 8th Wall. Vui lòng cấp quyền truy cập camera.'));
+        failStart(new Error('The 8th Wall camera timed out. Please allow camera access.'));
       }, 20000);
 
       const markReady = () => {
@@ -444,6 +454,7 @@ export class EightWallManager {
             camera: xr.camera,
             renderer: xr.renderer,
             runtimeVersion: this.runtimeVersion,
+            captureEngine: hasCaptureModules ? XR8 as ARCaptureEngine : null,
           });
           this.running = true;
           this.isStarting = false;
@@ -497,7 +508,7 @@ export class EightWallManager {
                   worldTracking: 'enabled concurrently',
                 });
               }
-              cb.onProgress?.('Hướng camera vào poster HYDRATING SERUM...');
+              cb.onProgress?.('Point the camera at the HYDRATING SERUM poster...');
             },
           },
         ],
@@ -530,7 +541,7 @@ export class EightWallManager {
 
       try {
         XR8.addCameraPipelineModules(modules);
-        cb.onProgress?.('Đang yêu cầu quyền camera...');
+        cb.onProgress?.('Requesting camera permission...');
         traceAR('XR8_RUN_CALLED', {
           configuredImageTargetCount: this.configuredImageTargetCount,
           disableWorldTracking: false,

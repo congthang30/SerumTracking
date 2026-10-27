@@ -40,7 +40,7 @@ function normalizeCameraLabel(raw: string): string {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
+    .replace(/\u0111/g, 'd')
     .trim();
 }
 
@@ -67,7 +67,7 @@ export function findBestWideCamera(devices: MediaDeviceInfo[]): MediaDeviceInfo 
   if (videoDevs.length === 0) return null;
   if (videoDevs.length === 1) return videoDevs[0];
 
-  // 1. Prefer dedicated 1x Main Wide camera ("Back Camera" / "Camera mặt sau" / "Back Wide Camera")
+  // 1. Prefer a dedicated 1x Main Wide camera, including localized rear-camera labels.
   // which has continuous autofocus from ~15cm to infinity without macro-lock blur at >20cm
   const primarySingleWide = videoDevs.find((d) => {
     const info = parseCameraInfo(d);

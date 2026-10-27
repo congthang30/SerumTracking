@@ -1,0 +1,172 @@
+.captureControls {
+  position: fixed;
+  z-index: 70;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 38px);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 68px;
+  padding: 8px 18px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(227, 231, 239, 0.2);
+  border-radius: 999px;
+  background: rgba(16, 17, 21, 0.8);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.captureButton {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 160ms ease, filter 160ms ease, opacity 160ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.captureButton:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: scale(1.05);
+}
+
+.captureButton:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.captureButton:focus-visible {
+  outline: 3px solid #7dd3fc;
+  outline-offset: 5px;
+}
+
+.captureButton:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.captureButton svg {
+  width: 27px;
+  height: 27px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.photoCaptureButton {
+  color: #17191d;
+  border: 3px solid #f7f8fa;
+  background: #f7f8fa;
+  box-shadow: inset 0 0 0 2px rgba(23, 25, 29, 0.56), 0 0 0 2px rgba(255, 255, 255, 0.8);
+}
+
+.photoCaptureButton svg {
+  width: 28px;
+  height: 28px;
+}
+
+.videoCaptureButton {
+  color: #fff;
+  background: #f33f49;
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.1), 0 0 0 2px rgba(243, 63, 73, 0.46);
+}
+
+.videoCaptureButton svg {
+  width: 27px;
+  height: 27px;
+}
+
+.videoCaptureRecording {
+  animation: recordingPulse 1.2s ease-in-out infinite;
+}
+
+.captureDivider {
+  width: 2px;
+  height: 36px;
+  border-radius: 2px;
+  background: rgba(206, 210, 219, 0.42);
+}
+
+.captureFeedback {
+  position: fixed;
+  z-index: 71;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 118px);
+  left: 50%;
+  width: max-content;
+  max-width: min(90vw, 420px);
+  padding: 10px 16px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(14, 17, 23, 0.82);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+}
+
+@keyframes recordingPulse {
+  50% { box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.1), 0 0 0 7px rgba(243, 63, 73, 0.2); }
+}
+
+@media (max-width: 380px) {
+  .captureControls {
+    gap: 12px;
+    padding-right: 15px;
+    padding-left: 15px;
+  }
+
+  .captureButton {
+    width: 46px;
+    height: 46px;
+  }
+}
+
+@media (max-height: 500px) {
+  .captureControls {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
+    min-height: 60px;
+    gap: 12px;
+    padding: 5px 14px;
+  }
+
+  .captureButton {
+    width: 44px;
+    height: 44px;
+  }
+
+  .captureDivider {
+    height: 26px;
+  }
+
+  .captureFeedback {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .videoCaptureRecording {
+    animation: none;
+  }
+}
+
+.captureControlsAboveDock {
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), 10px) + 88px);
+}
+
+.captureFeedbackAboveDock {
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), 10px) + 166px);
+}

@@ -40,7 +40,7 @@ export class SerumModelLoader {
         lastError = err;
       }
     }
-    throw lastError || new Error('Không thể tải file model serum GLB.');
+    throw lastError || new Error('Could not load the serum GLB model.');
   }
 
   private loadSingleGLB(
@@ -610,7 +610,7 @@ export class SerumModelLoader {
                   float ndotv = clamp(abs(dot(N, V)), 0.0, 1.0);
                   float fresnel = 1.0 - ndotv;
 
-                  // 1. Frosted Glass Body Density (Thành thủy tinh mờ đục nhẹ tự nhiên)
+                  // 1. Frosted Glass Body Density (naturally translucent frosted glass)
                   float thickness = pow(fresnel, 1.4);
                   float frostedOpacity = mix(uFrostedBase, uFrostedEdge, thickness);
 
@@ -618,7 +618,7 @@ export class SerumModelLoader {
                   float rimBand = smoothstep(0.48, 0.95, fresnel) * pow(fresnel, 2.2);
                   float rimEdge = smoothstep(0.78, 0.995, fresnel);
 
-                  // 3. Crisp vertical studio softbox light reflections (bề mặt thủy tinh bóng bẩy)
+                  // 3. Crisp vertical studio softbox light reflections (glossy glass surface)
                   vec3 light1 = normalize(vec3(-0.56, 0.42, 0.71));
                   vec3 light2 = normalize(vec3(0.62, 0.28, 0.73));
                   vec3 light3 = normalize(vec3(0.0, 0.86, 0.51));
@@ -1347,4 +1347,22 @@ export class SerumModelLoader {
       );
     });
   }
+}
+
+let preloadedModelPromise: Promise<LoadedSerumModel> | null = null;
+
+export function preloadSerumModel(): Promise<LoadedSerumModel> {
+  if (!preloadedModelPromise) {
+    preloadedModelPromise = new SerumModelLoader().load().catch((error) => {
+      preloadedModelPromise = null;
+      throw error;
+    });
+  }
+  return preloadedModelPromise;
+}
+
+export async function takePreloadedSerumModel(): Promise<LoadedSerumModel> {
+  const model = await preloadSerumModel();
+  preloadedModelPromise = null;
+  return model;
 }

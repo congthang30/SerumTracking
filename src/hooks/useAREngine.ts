@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { Ingredient } from '../types/ar';
 import { getIngredientById } from '../data/ingredients';
 import { SerumScene, applyNearClippingPlaneToXRCamera } from '../ar/scene/SerumScene';
-import { SerumModelLoader, LoadedSerumModel } from '../ar/models/SerumModelLoader';
+import { takePreloadedSerumModel, LoadedSerumModel } from '../ar/models/SerumModelLoader';
 import { ProductStoryTimeline, StoryPhase } from '../ar/animation/ProductStoryTimeline';
 import { ImageTrackingController } from '../ar/tracking/ImageTrackingController';
 import { EightWallManager } from '../ar/engine/EightWallManager';
@@ -11,6 +11,7 @@ import { SurfacePlacementController } from '../ar/tracking/SurfacePlacementContr
 import { beginARTraceSession, traceAR } from '../ar/xr/camera-fix';
 import { DEBUG_AR_PERF, worldTrackingDebugger } from '../ar/debug/WorldTrackingDebugger';
 import { arPerformanceMonitor } from '../ar/debug/ARPerformanceMonitor';
+import type { ARCaptureEngine } from '../types/capture';
 
 export interface UseAREngineReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -35,6 +36,11 @@ export interface UseAREngineReturn {
   relockToCamera: () => void;
   worldTrackingStatus: 'NORMAL' | 'LIMITED' | 'SIMULATION';
   surfaceGuidance: string;
+  isExperienceReady: boolean;
+  isCaptureReady: boolean;
+  captureEngine: ARCaptureEngine | null;
+  startupError: string | null;
+  startupStage: string;
 }
 
 function isMobileDevice(): boolean {
@@ -68,6 +74,11 @@ export function useAREngine(): UseAREngineReturn {
   });
   const [showSimPoster, setShowSimPoster] = useState(false);
   const [showWaterSpiral, setShowWaterSpiral] = useState(true);
+  const [isExperienceReady, setIsExperienceReady] = useState(false);
+  const [isCameraVideoReady, setIsCameraVideoReady] = useState(false);
+  const [captureEngine, setCaptureEngine] = useState<ARCaptureEngine | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupStage, setStartupStage] = useState('Loading the 3D model…');
 
   const toggleWaterSpiral = useCallback(() => {
     setShowWaterSpiral((prev) => {
@@ -199,6 +210,8 @@ export function useAREngine(): UseAREngineReturn {
   const startExperience = useCallback(async () => {
     if (!canvasRef.current || isStartingRef.current || hasLoadedModelRef.current || modelRef.current) return;
     isStartingRef.current = true;
+    setStartupError(null);
+    setStartupStage(isSimulation ? 'Loading the 3D preview…' : 'Loading the 3D model…');
     const canvas = canvasRef.current;
     if (!isSimulation) {
       worldTrackingDebugger.start();
@@ -215,9 +228,8 @@ export function useAREngine(): UseAREngineReturn {
       const serumScene = sceneRef.current;
 
       // 2. Load 3D Model
-      const modelLoader = new SerumModelLoader();
       if (!isSimulation) traceAR('SERUM_MODEL_LOAD_START', {});
-      const loadedModel = await modelLoader.load();
+      const loadedModel = await takePreloadedSerumModel();
       modelRef.current = loadedModel;
       animationDiagnosticFramesRef.current = 0;
       hasLoadedModelRef.current = true;
@@ -288,11 +300,16 @@ export function useAREngine(): UseAREngineReturn {
       if (isSimulation) {
         setupSimulationMode(serumScene, canvas);
       } else {
+        setStartupStage('Starting the AR camera…');
         await setupEightWallAR(canvas, serumScene);
       }
     } catch (err: any) {
       if (!isSimulation) traceAR('SERUM_AR_BOOT_FAILED', { error: String(err) }, 'error');
       hasLoadedModelRef.current = false;
+      setIsExperienceReady(false);
+      setIsCameraVideoReady(false);
+      setCaptureEngine(null);
+      setStartupError(err instanceof Error ? err.message : String(err));
     } finally {
       isStartingRef.current = false;
     }
@@ -341,6 +358,7 @@ export function useAREngine(): UseAREngineReturn {
       renderFrame(true);
     };
     loop();
+    setIsExperienceReady(true);
   };
 
   // Setup Real 8th Wall Camera Tracking
@@ -352,10 +370,11 @@ export function useAREngine(): UseAREngineReturn {
     eightWallRef.current = manager;
 
     await manager.startAR(canvas, {
-      onCameraStarted: ({ scene, camera, renderer, runtimeVersion }) => {
+      onCameraStarted: ({ scene, camera, renderer, runtimeVersion, captureEngine: xrCaptureEngine }) => {
         sceneObj.attachToXRScene(scene, camera, renderer);
         surfacePlacementRef.current?.attachToXRScene(scene, camera);
         trackingRef.current?.setCamera(camera);
+        setCaptureEngine(xrCaptureEngine);
         worldTrackingDebugger.setSceneObjects({
           scene,
           camera,
@@ -402,6 +421,21 @@ export function useAREngine(): UseAREngineReturn {
       onCameraStatus: (payload, video) => {
         worldTrackingDebugger.recordCameraStatus(payload, video);
         if (DEBUG_AR_PERF) arPerformanceMonitor.recordCameraStatus(payload, video);
+        const status = String(payload.status ?? '');
+        const videoReady = status === 'hasVideo' || Boolean(video && video.readyState >= 2);
+        if (videoReady) {
+          setIsCameraVideoReady(true);
+          setIsExperienceReady(true);
+        } else if (status === 'requesting') {
+          setIsCameraVideoReady(false);
+          setStartupStage('Allow camera access when your browser asks.');
+        } else if (status === 'hasStream') {
+          setStartupStage('Opening the camera video…');
+        } else if (status === 'failed') {
+          setIsCameraVideoReady(false);
+          setIsExperienceReady(false);
+          setStartupError('Camera access failed. Check browser permissions, then try again.');
+        }
       },
       onFrameUpdate: (context) => {
         if (DEBUG_AR_PERF) arPerformanceMonitor.beginTrackingUpdate();
@@ -414,7 +448,13 @@ export function useAREngine(): UseAREngineReturn {
           if (worldTrackingDebugger.isEnabled) worldTrackingDebugger.endFrame();
         }
       },
-      onError: () => {},
+      onError: (message) => {
+        setIsExperienceReady(false);
+        setIsCameraVideoReady(false);
+        setCaptureEngine(null);
+        setStartupError(message);
+      },
+      onProgress: (stage) => setStartupStage(stage),
     });
   };
 
@@ -506,7 +546,7 @@ export function useAREngine(): UseAREngineReturn {
         modelRef.current.mixer.update(safeDt);
       }
 
-      // Lively continuous floating bounce ("nhún nhún") for the 3 ingredient molecules once revealed
+      // Lively continuous floating bounce for the 3 ingredient molecules once revealed
       if (story && story.sequenceTime >= 8.95) {
         const src = modelRef.current.sourceScene;
         const floatTime = story.sequenceTime - 8.95;
@@ -884,5 +924,10 @@ export function useAREngine(): UseAREngineReturn {
     relockToCamera,
     worldTrackingStatus,
     surfaceGuidance,
+    isExperienceReady,
+    isCaptureReady: !isSimulation && isExperienceReady && isCameraVideoReady && captureEngine !== null,
+    captureEngine,
+    startupError,
+    startupStage,
   };
 }

@@ -8,6 +8,7 @@ export interface SurfacePlacementOverlayProps {
   guidanceText?: string;
   onPlace: () => void;
   onRelock?: () => void;
+  hasCaptureControls?: boolean;
 }
 
 /* Custom Vector Icons for Luxury Cosmetic AR UI */
@@ -81,6 +82,7 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
   guidanceText,
   onPlace,
   onRelock,
+  hasCaptureControls = false,
 }) => {
   const [showToast, setShowToast] = useState(false);
 
@@ -103,13 +105,13 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
     <>
       {/* 1. Camera-Locked Mode: Placement Button or tracking guidance */}
       {isCameraLocked && (
-        <div className="surface-placement-container interactive-ui">
+        <div className={`surface-placement-container interactive-ui ${hasCaptureControls ? 'capture-active' : ''}`}>
           {canPlaceOnSurface ? (
             <button
               className="surface-place-btn"
               onClick={onPlace}
-              aria-label="Đặt sản phẩm tại đây"
-              title="Đặt sản phẩm tại đây"
+              aria-label="Place the product here"
+              title="Place the product here"
             >
               <span className="place-btn-shimmer" aria-hidden="true" />
               <span className="place-btn-ripple" aria-hidden="true" />
@@ -145,17 +147,17 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
           )}
 
           {onRelock && (
-            <div className="surface-reposition-container interactive-ui">
+            <div className={`surface-reposition-container interactive-ui ${hasCaptureControls ? 'capture-active' : ''}`}>
               <button
                 className="surface-reposition-btn"
                 onClick={onRelock}
-                aria-label="Đổi vị trí sản phẩm"
-                title="Ghim lại vào camera để đổi vị trí"
+                aria-label="Reposition the product"
+                title="Attach the product to the camera to reposition it"
               >
                 <span className="reposition-icon-wrap">
                   <RepositionIcon />
                 </span>
-                <span className="reposition-text">Đổi vị trí</span>
+                <span className="reposition-text">Reposition</span>
               </button>
             </div>
           )}

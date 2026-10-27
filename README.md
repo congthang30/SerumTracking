@@ -1,25 +1,25 @@
 # HYDRATING SERUM — WEBAR (REACT + VITE + THREE.JS + 8TH WALL)
 
-Ứng dụng WebAR Image Tracking cao cấp cho sản phẩm **HYDRATING SERUM**, được xây dựng bằng **React**, **Vite**, **TypeScript**, **Three.js** và **8th Wall Open-Source XR Engine**.
+A premium WebAR image-tracking experience for **HYDRATING SERUM**, built with **React**, **Vite**, **TypeScript**, **Three.js**, and the **8th Wall Open-Source XR Engine**.
 
 ---
 
-## 1. Cấu Trúc Thư Mục Dự Án
+## 1. Project Structure
 
 ```
 serum/
 ├── public/
 │   ├── assets/
 │   │   ├── models/
-│   │   │   ├── serum_ex.glb          # 3D Model chính thức (39.9 MB)
-│   │   │   └── serum4.glb            # Symlink/Alias hỗ trợ
-│   │   ├── textures/                 # Nhãn và textures trích xuất
+│   │   │   ├── serum_ex.glb          # Official 3D model (39.9 MB)
+│   │   │   └── serum4.glb            # Supporting symlink/alias
+│   │   ├── textures/                 # Extracted labels and textures
 │   │   └── image-target/
-│   │       ├── img_target.png        # Poster gốc (1122x1402)
+│   │       ├── img_target.png        # Original poster (1122x1402)
 │   │       ├── serum-target.json     # Metadata 8th Wall Image Target
-│   │       ├── serum_luminance.jpg   # Ảnh grayscale độ tương phản cao
+│   │       ├── serum_luminance.jpg   # High-contrast grayscale image
 │   │       ├── serum_thumbnail.png   # Thumbnail
-│   │       └── serum_cropped.png     # Ảnh crop chuẩn tỷ lệ
+│   │       └── serum_cropped.png     # Image cropped to the target aspect ratio
 │   └── external/
 │       └── xr/
 │           ├── xr.js                 # 8th Wall Core Engine (1 MB)
@@ -28,26 +28,26 @@ serum/
 ├── src/
 │   ├── components/
 │   │   ├── ARCanvas.tsx              # WebGL rendering canvas
-│   │   ├── ARLoadingScreen.tsx       # Màn hình loading & cấp quyền camera
-│   │   ├── ARScanOverlay.tsx         # Khung ngắm quét laser & hướng dẫn
-│   │   └── IngredientOverlay.tsx     # Lớp SVG vẽ đường line & Modal chi tiết
+│   │   ├── ARLoadingScreen.tsx       # Loading screen and camera permission
+│   │   ├── ARScanOverlay.tsx         # Scanning frame and guidance
+│   │   └── IngredientOverlay.tsx     # SVG line layer and details modal
 │   ├── ar/
 │   │   ├── engine/
-│   │   │   └── EightWallManager.ts   # Quản lý vòng đời 8th Wall XR pipeline
+│   │   │   └── EightWallManager.ts   # 8th Wall XR pipeline lifecycle
 │   │   ├── tracking/
-│   │   │   └── ImageTrackingController.ts # Bộ lọc làm mượt pose (slerp/lerp)
+│   │   │   └── ImageTrackingController.ts # Pose smoothing filter (slerp/lerp)
 │   │   ├── scene/
-│   │   │   └── SerumScene.ts         # Khởi tạo Three.js, studio lighting rig
+│   │   │   └── SerumScene.ts         # Three.js setup and studio lighting rig
 │   │   ├── models/
-│   │   │   └── SerumModelLoader.ts   # Nạp GLB, khúc xạ nước vật lý, 3D anchors
+│   │   │   └── SerumModelLoader.ts   # GLB loading, water refraction, 3D anchors
 │   │   ├── animation/
-│   │   │   └── ProductStoryTimeline.ts # Timeline cinematic của sản phẩm
+│   │   │   └── ProductStoryTimeline.ts # Product cinematic timeline
 │   │   └── callouts/
-│   │       └── CalloutProjection.ts  # Chiếu tọa độ 3D -> Màn hình 60fps
+│   │       └── CalloutProjection.ts  # Project 3D coordinates to screen at 60 fps
 │   ├── hooks/
-│   │   └── useAREngine.ts            # Custom hook tích hợp UI và WebAR
+│   │   └── useAREngine.ts            # Custom hook connecting the UI and WebAR
 │   ├── data/
-│   │   └── ingredients.ts            # Dữ liệu 2 thành phần hoạt chất
+│   │   └── ingredients.ts            # Data for three active ingredients
 │   ├── styles/
 │   │   └── ar.css                    # Luxury Skincare styling
 │   ├── types/
@@ -62,82 +62,82 @@ serum/
 
 ---
 
-## 2. Hướng Dẫn Cài Đặt & Chạy Ứng Dụng
+## 2. Installation and Running the App
 
-### Cài đặt dependencies:
+### Install dependencies:
 ```bash
 cd serum
 npm install
 ```
 
-### Chạy môi trường Development:
+### Start the development server:
 ```bash
 npm run dev
 ```
-Trình duyệt mở tại: `http://localhost:5173/`
+Open the app at: `http://localhost:5173/`
 
-### Build Production:
+### Build for production:
 ```bash
 npm run build
 ```
-Thư mục bundle nằm tại `dist/`.
+The bundle is written to `dist/`.
 
-### Xem trước bản Build (Preview):
+### Preview the build:
 ```bash
 npm run preview
 ```
 
 ---
 
-## 3. Cách Thử Nghiệm Trên Điện Thoại
+## 3. Testing on a Phone
 
-1. **Yêu cầu kết nối**:
-   - Máy tính và điện thoại kết nối **cùng một mạng Wi-Fi**.
-   - Chạy `npm run dev -- --host`. Vite sẽ hiển thị địa chỉ LAN, ví dụ: `http://192.168.1.15:5173/`.
-2. **Yêu cầu quyền Camera (HTTPS)**:
-   - Trình duyệt di động (Safari iOS / Chrome Android) yêu cầu kết nối an toàn (HTTPS hoặc localhost) để mở camera.
-   - Bạn có thể dùng công cụ tunnel nhanh như **ngrok**:
+1. **Network requirements**:
+   - Connect the computer and phone to the **same Wi-Fi network**.
+   - Run `npm run dev -- --host`. Vite will display a LAN address, for example: `http://192.168.1.15:5173/`.
+2. **Camera permission (HTTPS)**:
+   - Mobile browsers (Safari on iOS / Chrome on Android) require a secure connection (HTTPS or localhost) to access the camera.
+   - You can use a tunnel such as **ngrok**:
      ```bash
      ngrok http 5173
      ```
-   - Mở đường dẫn `https://xxxx.ngrok-free.app` trên điện thoại.
-3. **Quét Poster**:
-   - Khi mở trang trên điện thoại, ứng dụng tự khởi động AR. Chọn **Cho phép (Allow)** khi trình duyệt hỏi quyền camera.
-   - Hướng camera vào poster [img_target.png](public/assets/image-target/img_target.png) (có thể hiển thị poster trên màn hình máy tính hoặc in ra giấy).
-   - Chai serum 3D sẽ xuất hiện, nổi bồng bềnh và lần lượt hiển thị 2 đường Callout thành phần.
+   - Open `https://xxxx.ngrok-free.app` on the phone.
+3. **Scan the poster**:
+   - When you open the page on the phone, tap **Start Demo**. Select **Allow** when the browser requests camera access.
+   - Point the camera at the [img_target.png](public/assets/image-target/img_target.png) poster (shown on a computer screen or printed).
+   - The 3D serum bottle appears, floats, and shows three ingredient callouts in sequence. Use the camera and video buttons to capture or record the AR view.
 
 ---
 
-## 4. Xem Trước 3D Trên Máy Tính
+## 4. Previewing 3D on a Computer
 
-- Trên máy tính, trang tự mở preview 3D có thể xoay và quan sát.
-- Có thể thêm `?sim=1` vào URL để mở preview thủ công trên điện thoại.
-- Poster [img_target.png](public/assets/image-target/img_target.png) không bật mặc định trong preview.
+- On a computer, tap **Start Demo** to open a 3D preview that you can rotate and inspect.
+- Add `?sim=1` to the URL to open the preview manually on a phone.
+- The [img_target.png](public/assets/image-target/img_target.png) poster is hidden by default in the preview.
 
 ---
 
-## 5. Tùy Biến Nâng Cao
+## 5. Advanced Customization
 
-### A. Thay đổi Image Target:
-1. Đặt ảnh target mới vào `public/assets/image-target/your_target.png`.
-2. Cập nhật `src/ar/engine/EightWallManager.ts` đường dẫn JSON hoặc dùng file metadata mới.
+### A. Change the image target:
+1. Place the new target image at `public/assets/image-target/your_target.png`.
+2. Update the JSON path in `src/ar/engine/EightWallManager.ts` or use a new metadata file.
 
-### B. Chỉnh kích thước và vị trí Model:
-Trong file `src/ar/models/SerumModelLoader.ts`:
-- Vị trí offset theo trục Z trên poster: `modelScene.position.set(0, 0, -0.20);`
-- Tỷ lệ hiển thị sản phẩm được điều khiển bởi `baseScale` trong `src/ar/animation/ProductStoryTimeline.ts`.
+### B. Adjust model size and position:
+In `src/ar/models/SerumModelLoader.ts`:
+- Z-axis offset from the poster: `modelScene.position.set(0, 0, -0.20);`
+- Product display scale is controlled by `baseScale` in `src/ar/animation/ProductStoryTimeline.ts`.
 
-### C. Thêm hoặc đổi thành phần Callout:
-Mở `src/data/ingredients.ts` và chỉnh sửa hoặc thêm mới vào mảng `INGREDIENTS`:
+### C. Add or change an ingredient callout:
+Open `src/data/ingredients.ts` and edit or add an item in the `INGREDIENTS` array:
 ```typescript
 {
   id: 'vitamin_c',
   number: '03',
-  tag: 'Chống oxy hóa',
+  tag: 'Antioxidant',
   title: 'VITAMIN C',
-  subtitle: 'Làm sáng đều màu da',
-  description: 'Dẫn xuất Vitamin C ổn định cao...',
-  highlight: '🌟 Hỗ trợ mờ thâm và sáng da tự nhiên.',
+  subtitle: 'Brightens and evens skin tone',
+  description: 'A highly stable Vitamin C derivative...',
+  highlight: '🌟 Helps fade dark spots and brighten skin naturally.',
   side: 'right',
   localAnchor: new THREE.Vector3(0.13, 0.05, 0.09),
 }
@@ -145,14 +145,14 @@ Mở `src/data/ingredients.ts` và chỉnh sửa hoặc thêm mới vào mảng 
 
 ---
 
-## 6. Báo Cáo Kiểm Thử
+## 6. Test Report
 
-Chi tiết giới hạn single-plane của XR8, reticle dùng mốc sàn và lưới đã ẩn: [Surface Tracking](docs/surface-tracking.md).
+For details on XR8's single-plane limit, the floor-based reticle, and the hidden grid, see [Surface Tracking](docs/surface-tracking.md).
 
-| Hạng mục | Trạng thái | Ghi chú |
+| Item | Status | Notes |
 | :--- | :---: | :--- |
-| **Cài đặt & Build Vite** | **ĐẠT** | `tsc --noEmit` & `npm run build` chạy thành công không cảnh báo lỗi |
-| **Model 3D & Vật liệu** | **ĐẠT** | Giữ nguyên 100% dung dịch serum hồng, nắp rose gold, hoa nở, cánh hoa rơi và nước khúc xạ |
-| **Vị trí căn chỉnh poster** | **ĐẠT** | Đã nâng trục dọc để bệ đá và thân chai khớp chính xác với hình vẽ trên [img_target.png](file:///home/congthang/Downloads/MODEL/serum/public/assets/image-target/img_target.png) |
-| **Chế độ Thử nghiệm (Simulation)** | **ĐẠT** | Xác minh render tự động qua Chrome Headless với kết quả hoàn hảo |
-| **Kiểm thử Camera thật trên Mobile** | *Cần chạy trên thiết bị* | Yêu cầu mở qua HTTPS/ngrok trên điện thoại để cấp quyền camera vật lý |
+| **Vite installation and build** | **PASS** | `tsc --noEmit` and `npm run build` completed without errors |
+| **3D model and materials** | **PASS** | The pink serum, rose-gold cap, blooming flowers, falling petals, and refractive water were preserved |
+| **Poster alignment** | **PASS** | The vertical axis was raised so the rock pedestal and bottle align with the illustration on [img_target.png](file:///home/congthang/Downloads/MODEL/serum/public/assets/image-target/img_target.png) |
+| **Simulation mode** | **PASS** | Automatic rendering was verified in headless Chrome |
+| **Real camera test on mobile** | *Device test required* | Open through HTTPS/ngrok on a phone to grant access to the physical camera |

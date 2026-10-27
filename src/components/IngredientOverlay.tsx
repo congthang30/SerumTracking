@@ -39,8 +39,8 @@ export const IngredientOverlay: React.FC<IngredientOverlayProps> = ({
             <button
               className="modal-close-icon-btn"
               onClick={onCloseModal}
-              aria-label="Đóng popup"
-              title="Đóng"
+              aria-label="Close details"
+              title="Close"
             >
               ✕
             </button>
@@ -54,7 +54,7 @@ export const IngredientOverlay: React.FC<IngredientOverlayProps> = ({
               )}
               <div style={{ paddingRight: '24px' }}>
                 <span className="modal-tag" style={{ display: 'block', marginBottom: '3px' }}>
-                  Thành phần {activeIngredient.number} • {activeIngredient.tag}
+                  Ingredient {activeIngredient.number} • {activeIngredient.tag}
                 </span>
                 <h2 className="modal-title" style={{ margin: 0 }}>{activeIngredient.title}</h2>
               </div>
@@ -65,7 +65,7 @@ export const IngredientOverlay: React.FC<IngredientOverlayProps> = ({
             <p className="modal-body">{activeIngredient.description}</p>
             <div className="modal-highlight">{activeIngredient.highlight}</div>
             <button className="modal-close-btn" onClick={onCloseModal}>
-              Đã hiểu & Đóng
+              Got it, close
             </button>
           </div>
         </div>
