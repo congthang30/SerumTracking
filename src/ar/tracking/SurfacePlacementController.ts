@@ -37,6 +37,9 @@ export class SurfacePlacementController {
   private lastPlaneY = 0;
   private hasCalibratedPlane = false;
   private initialPosterPosition: THREE.Vector3 | null = null;
+  private lastHitDistance = 0;
+  private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
+  private worldTrackingReason = 'INITIALIZING';
 
   // Placement glide animation
   private isAnimatingPlacement = false;
@@ -99,6 +102,33 @@ export class SurfacePlacementController {
         this.reticleGroup.visible = false;
       }
     }
+  }
+
+  public setTrackingStatus(status: 'NORMAL' | 'LIMITED', reason = 'UNDEFINED'): void {
+    this.worldTrackingStatus = status;
+    this.worldTrackingReason = reason;
+    if (status === 'LIMITED' && !this.isSimulation) {
+      if (this.canPlace) {
+        this.canPlace = false;
+        this.onPlacementChanged?.(this.isPlaced, false);
+      }
+    }
+  }
+
+  public get trackingStatusInfo(): { status: 'NORMAL' | 'LIMITED'; reason: string } {
+    return { status: this.worldTrackingStatus, reason: this.worldTrackingReason };
+  }
+
+  public get planeY(): number {
+    return this.lastPlaneY;
+  }
+
+  public get isPlaneCalibrated(): boolean {
+    return this.hasCalibratedPlane;
+  }
+
+  public get hitDistance(): number {
+    return this.lastHitDistance;
   }
 
   public get hasTargetBeenFound(): boolean {
@@ -247,6 +277,20 @@ export class SurfacePlacementController {
       return;
     }
 
+    // Only detect surfaces and allow placement if SLAM world tracking is sufficiently stable
+    const isTrackingStable = this.isSimulation || this.worldTrackingStatus === 'NORMAL';
+    if (!isTrackingStable) {
+      this.hasSurface = false;
+      if (this.reticleGroup.visible) {
+        this.reticleGroup.visible = false;
+      }
+      if (this.canPlace) {
+        this.canPlace = false;
+        this.onPlacementChanged?.(this.isPlaced, false);
+      }
+      return;
+    }
+
     // Detect surface in front of camera
     const surfaceHit = this.detectSurface();
     if (surfaceHit) {
@@ -328,6 +372,7 @@ export class SurfacePlacementController {
         // This guarantees that the 20cm product ALWAYS appears at a consistent, natural tabletop size!
         // No more "lúc thì to lúc thì nhỏ" caused by erratic raycast distances!
         const clampedT = Math.min(0.85, Math.max(0.60, rawT));
+        this.lastHitDistance = clampedT;
 
         return {
           position: new THREE.Vector3(
@@ -354,6 +399,7 @@ export class SurfacePlacementController {
       if (rawT > 0.1 && rawT < 10.0) {
         // Clamp distance in simulation mode to comfortable tabletop range (0.65m - 0.85m)
         const t = Math.min(0.85, Math.max(0.65, rawT));
+        this.lastHitDistance = t;
         return {
           position: new THREE.Vector3(
             camPos.x + camDir.x * t,

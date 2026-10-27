@@ -4,6 +4,7 @@ export interface SurfacePlacementOverlayProps {
   hasTargetFound: boolean;
   isCameraLocked: boolean;
   canPlaceOnSurface: boolean;
+  trackingStatus?: 'NORMAL' | 'LIMITED' | 'SIMULATION';
   onPlace: () => void;
   onRelock?: () => void;
 }
@@ -82,6 +83,7 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
   hasTargetFound,
   isCameraLocked,
   canPlaceOnSurface,
+  trackingStatus = 'NORMAL',
   onPlace,
   onRelock,
 }) => {
@@ -119,12 +121,16 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
               <TargetPlacementIcon />
             </button>
           ) : (
-            <div className="surface-guidance-pill">
+            <div className={`surface-guidance-pill ${trackingStatus === 'LIMITED' ? 'tracking-limited' : ''}`}>
               <span className="guidance-icon-wrap">
                 <SearchPlaneIcon />
               </span>
-              <span className="guidance-dot" />
-              <span className="guidance-text">Lia camera tới mặt phẳng (bàn hoặc sàn)</span>
+              <span className={`guidance-dot ${trackingStatus === 'LIMITED' ? 'warning' : ''}`} />
+              <span className="guidance-text">
+                {trackingStatus === 'LIMITED'
+                  ? 'Đang ổn định SLAM camera...'
+                  : 'Lia camera tới mặt phẳng (bàn hoặc sàn)'}
+              </span>
             </div>
           )}
         </div>

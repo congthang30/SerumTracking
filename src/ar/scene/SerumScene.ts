@@ -47,6 +47,8 @@ export class SerumScene {
   public productRoot: THREE.Group;
   public userRotationGroup: THREE.Group;
   public lights: THREE.Light[] = [];
+  /** 3D Grid on the detected tabletop plane for visual verification of 8th Wall SLAM accuracy. */
+  public planeDebugGrid: THREE.GridHelper;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -74,6 +76,13 @@ export class SerumScene {
     this.userRotationGroup = new THREE.Group();
     this.userRotationGroup.name = 'UserRotationGroup';
     this.productRoot.add(this.userRotationGroup);
+
+    // 3D Tabletop Plane Debug Grid Helper (toggleable for inspecting 8th Wall SLAM plane accuracy)
+    this.planeDebugGrid = new THREE.GridHelper(1.8, 18, 0xd4af37, 0x4a4a4a);
+    this.planeDebugGrid.name = 'PlaneDebugGrid';
+    this.planeDebugGrid.position.set(0, -0.001, 0);
+    this.planeDebugGrid.visible = false;
+    this.scene.add(this.planeDebugGrid);
 
     this.setupLighting();
     this.setupContactShadow();
@@ -181,6 +190,9 @@ export class SerumScene {
     if (this.worldAnchorGroup.parent !== xrScene) {
       xrScene.add(this.worldAnchorGroup);
     }
+    if (this.planeDebugGrid.parent !== xrScene) {
+      xrScene.add(this.planeDebugGrid);
+    }
     for (const light of this.lights) {
       if (light.parent !== xrScene) {
         xrScene.add(light);
@@ -217,11 +229,26 @@ export class SerumScene {
     if (this.worldAnchorGroup.parent !== this.scene) {
       this.scene.add(this.worldAnchorGroup);
     }
+    if (this.planeDebugGrid.parent !== this.scene) {
+      this.scene.add(this.planeDebugGrid);
+    }
     for (const light of this.lights) {
       if (light.parent !== this.scene) {
         this.scene.add(light);
       }
     }
+  }
+
+  public setPlaneGridPosition(y: number, x = 0, z = 0): void {
+    this.planeDebugGrid.position.set(x, y + 0.0005, z);
+  }
+
+  public setPlaneGridVisible(visible: boolean): void {
+    this.planeDebugGrid.visible = visible;
+  }
+
+  public get isPlaneGridVisible(): boolean {
+    return this.planeDebugGrid.visible;
   }
 
   public handleResize(): void {

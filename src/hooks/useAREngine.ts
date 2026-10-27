@@ -11,6 +11,7 @@ import { SurfacePlacementController } from '../ar/tracking/SurfacePlacementContr
 import { beginARTraceSession, traceAR } from '../ar/xr/camera-fix';
 import { DEBUG_AR_PERF, worldTrackingDebugger } from '../ar/debug/WorldTrackingDebugger';
 import { arPerformanceMonitor } from '../ar/debug/ARPerformanceMonitor';
+import { arTrackingDiagnostics } from '../ar/debug/ARTrackingDiagnostics';
 
 export interface UseAREngineReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -33,6 +34,11 @@ export interface UseAREngineReturn {
   canPlaceOnSurface: boolean;
   placeOnSurface: () => void;
   relockToCamera: () => void;
+  worldTrackingStatus: 'NORMAL' | 'LIMITED' | 'SIMULATION';
+  isPlaneGridVisible: boolean;
+  togglePlaneGrid: () => void;
+  toggleTrackingMode: () => void;
+  trackingMode: 'CAMERA_ATTACHED' | 'WORLD_ANCHORED';
 }
 
 function isMobileDevice(): boolean {
@@ -80,6 +86,10 @@ export function useAREngine(): UseAREngineReturn {
   const [hasTargetFound, setHasTargetFound] = useState(isSimulation);
   const [canPlaceOnSurface, setCanPlaceOnSurface] = useState(false);
   const [isCameraLocked, setIsCameraLocked] = useState(true);
+  const [worldTrackingStatus, setWorldTrackingStatus] = useState<'NORMAL' | 'LIMITED' | 'SIMULATION'>(
+    isSimulation ? 'SIMULATION' : 'LIMITED'
+  );
+  const [isPlaneGridVisible, setIsPlaneGridVisible] = useState(false);
 
   // Engine references kept outside React state for 60fps performance
   const sceneRef = useRef<SerumScene | null>(null);
@@ -150,6 +160,29 @@ export function useAREngine(): UseAREngineReturn {
     trackingRef.current?.relockCamera();
     setIsCameraLocked(true);
   }, []);
+
+  const togglePlaneGrid = useCallback(() => {
+    setIsPlaneGridVisible((prev) => {
+      const next = !prev;
+      sceneRef.current?.setPlaneGridVisible(next);
+      arTrackingDiagnostics.setPlaneGridVisible(next);
+      return next;
+    });
+  }, []);
+
+  const toggleTrackingMode = useCallback(() => {
+    if (isCameraLocked) {
+      if (surfacePlacementRef.current?.placeProduct()) {
+        trackingRef.current?.unlockCamera();
+        setIsCameraLocked(false);
+        setCanPlaceOnSurface(false);
+      }
+    } else {
+      surfacePlacementRef.current?.relockToCamera();
+      trackingRef.current?.relockCamera();
+      setIsCameraLocked(true);
+    }
+  }, [isCameraLocked]);
 
   const replaySequence = useCallback(() => {
     if (!modelAnimationStartedRef.current) return;
@@ -376,6 +409,9 @@ export function useAREngine(): UseAREngineReturn {
       onWorldTrackingStatus: (status, reason) => {
         worldTrackingDebugger.recordTrackingStatus(status, reason ?? 'UNDEFINED');
         trackingRef.current?.setWorldTrackingStatus(status, reason);
+        surfacePlacementRef.current?.setTrackingStatus(status, reason ?? 'UNDEFINED');
+        arTrackingDiagnostics.recordTrackingStatus(status, reason ?? 'UNDEFINED');
+        setWorldTrackingStatus(status);
       },
       onPipelineState: (state) => worldTrackingDebugger.recordPipelineState(state),
       onPipelineEventPhase: (phase) => {
@@ -423,6 +459,26 @@ export function useAREngine(): UseAREngineReturn {
     const safeDt = dt > 0.0001 && dt < 0.2 ? dt : 0.016;
     surfacePlacementRef.current?.update(safeDt);
     const scene = sceneRef.current;
+
+    // Keep 3D Plane Grid aligned with calibrated tabletop plane height
+    if (scene && surfacePlacementRef.current) {
+      scene.setPlaneGridPosition(surfacePlacementRef.current.planeY);
+    }
+
+    // Zero-overhead sampling for AR 6DoF Diagnostics HUD
+    arTrackingDiagnostics.updateFrame({
+      dt: safeDt,
+      camera: scene?.camera ?? null,
+      productRoot: scene?.productRoot ?? null,
+      canvas: canvasRef.current,
+      trackingMode: isCameraLocked ? 'CAMERA_ATTACHED' : 'WORLD_ANCHORED',
+      imageTargetState: trackingRef.current?.trackingState ?? 'SCANNING',
+      planeY: surfacePlacementRef.current?.planeY ?? 0,
+      isPlaneCalibrated: surfacePlacementRef.current?.isPlaneCalibrated ?? false,
+      hitDistanceM: surfacePlacementRef.current?.hitDistance ?? 0,
+      planeGridVisible: isPlaneGridVisible,
+      isSimulation,
+    });
     const debugStoryBefore = worldTrackingDebugger.captureTransform(scene?.userRotationGroup);
     const debugBottleBefore = worldTrackingDebugger.captureTransform(modelRef.current?.bottleGroup);
     const debugModelBefore = worldTrackingDebugger.captureTransform(modelRef.current?.modelScene);
@@ -789,5 +845,10 @@ export function useAREngine(): UseAREngineReturn {
     canPlaceOnSurface,
     placeOnSurface,
     relockToCamera,
+    worldTrackingStatus,
+    isPlaneGridVisible,
+    togglePlaneGrid,
+    toggleTrackingMode,
+    trackingMode: isCameraLocked ? 'CAMERA_ATTACHED' : 'WORLD_ANCHORED',
   };
 }

@@ -3,6 +3,7 @@ import { useAREngine } from './hooks/useAREngine';
 import { ARCanvas } from './components/ARCanvas';
 import { IngredientOverlay } from './components/IngredientOverlay';
 import { SurfacePlacementOverlay } from './components/SurfacePlacementOverlay';
+import { ARTrackingDebugHUD } from './components/ARTrackingDebugHUD';
 import './styles/ar.css';
 
 export const App: React.FC = () => {
@@ -16,6 +17,11 @@ export const App: React.FC = () => {
     canPlaceOnSurface,
     placeOnSurface,
     relockToCamera,
+    worldTrackingStatus,
+    isPlaneGridVisible,
+    togglePlaneGrid,
+    toggleTrackingMode,
+    trackingMode,
   } = useAREngine();
 
   return (
@@ -28,6 +34,7 @@ export const App: React.FC = () => {
         hasTargetFound={hasTargetFound}
         isCameraLocked={isCameraLocked}
         canPlaceOnSurface={canPlaceOnSurface}
+        trackingStatus={worldTrackingStatus}
         onPlace={placeOnSurface}
         onRelock={relockToCamera}
       />
@@ -37,6 +44,14 @@ export const App: React.FC = () => {
         activeIngredient={activeIngredient}
         onSelectIngredient={openIngredientModal}
         onCloseModal={closeIngredientModal}
+      />
+
+      {/* 6DoF World Tracking Diagnostics HUD (Toggleable, 10Hz low-overhead) */}
+      <ARTrackingDebugHUD
+        isPlaneGridVisible={isPlaneGridVisible}
+        onTogglePlaneGrid={togglePlaneGrid}
+        trackingMode={trackingMode}
+        onToggleTrackingMode={toggleTrackingMode}
       />
     </>
   );
