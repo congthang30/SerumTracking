@@ -41,7 +41,7 @@ export class SurfacePlacementController {
   private hasPreviewPosition = false;
   private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
   private worldTrackingReason = 'INITIALIZING';
-  private currentGuidance = 'Giữ camera ổn định trên mặt sàn';
+  private currentGuidance = 'Hold the camera steady over the floor';
   private lastReportedGuidance = '';
 
   // Placement glide animation
@@ -96,10 +96,10 @@ export class SurfacePlacementController {
     this.isTargetFound = found;
     if (found) {
       this.invalidatePreview();
-      this.notifyPlacementState(false, 'Giữ camera ổn định trên mặt sàn');
+      this.notifyPlacementState(false, 'Hold the camera steady over the floor');
     } else {
       this.invalidatePreview();
-      this.notifyPlacementState(false, 'Lia camera tới mục tiêu');
+      this.notifyPlacementState(false, 'Point the camera at the target');
     }
   }
 
@@ -287,7 +287,7 @@ export class SurfacePlacementController {
       if (!this.isPlaced) {
         this.reticleGroup.position.copy(intersection.position);
         this.reticleGroup.visible = true;
-        this.notifyPlacementState(true, 'Đặt sản phẩm trên mặt sàn');
+        this.notifyPlacementState(true, 'Place the product on the floor');
       }
     } else {
       this.hasPreviewIntersection = false;
@@ -303,7 +303,7 @@ export class SurfacePlacementController {
     this.hasCameraSample = false;
     this.stableTrackingSeconds = 0;
     this.reticleGroup.visible = false;
-    if (this.canPlace) this.notifyPlacementState(false, 'Giữ camera ổn định trên mặt sàn');
+    if (this.canPlace) this.notifyPlacementState(false, 'Hold the camera steady over the floor');
   }
 
   private projectGroundPlane(dt: number): PreviewIntersection | null {
@@ -317,7 +317,7 @@ export class SurfacePlacementController {
       if (this.worldTrackingStatus !== 'NORMAL') {
         this.stableTrackingSeconds = 0;
         this.hasCameraSample = false;
-        this.currentGuidance = 'Đợi World Tracking ổn định';
+        this.currentGuidance = 'Waiting for world tracking to stabilize';
         return null;
       }
       const camQuat = new THREE.Quaternion();
@@ -334,18 +334,18 @@ export class SurfacePlacementController {
       this.lastCameraQuaternion.copy(camQuat);
       this.hasCameraSample = true;
       if (this.stableTrackingSeconds < 0.35) {
-        this.currentGuidance = 'Giữ camera ổn định trên mặt sàn';
+        this.currentGuidance = 'Hold the camera steady over the floor';
         return null;
       }
     }
 
     if (camDir.y >= -0.05) {
-      this.currentGuidance = 'Nghiêng camera xuống mặt sàn';
+      this.currentGuidance = 'Tilt the camera down toward the floor';
       return null;
     }
     const planeY = this.planeY;
     if (camPos.y <= planeY) {
-      this.currentGuidance = 'Camera cần ở cao hơn mặt sàn';
+      this.currentGuidance = 'Raise the camera above the floor';
       return null;
     }
     const rayDistance = (planeY - camPos.y) / camDir.y;
@@ -359,7 +359,7 @@ export class SurfacePlacementController {
     if (this.hasPreviewPosition && rawPosition.distanceTo(this.previewPosition) > 0.75) {
       this.stableTrackingSeconds = 0;
       this.hasPreviewPosition = false;
-      this.currentGuidance = 'Giữ camera ổn định để cập nhật lưới';
+      this.currentGuidance = 'Hold the camera steady to update the grid';
       return null;
     }
     if (!this.hasPreviewPosition) {
@@ -369,7 +369,7 @@ export class SurfacePlacementController {
       this.previewPosition.lerp(rawPosition, 1 - Math.exp(-dt / 0.12));
       this.previewPosition.y = planeY;
     }
-    this.currentGuidance = 'Đặt sản phẩm trên mặt sàn';
+    this.currentGuidance = 'Place the product on the floor';
     return { position: this.previewPosition };
   }
 

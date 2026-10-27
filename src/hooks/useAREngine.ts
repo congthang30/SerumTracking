@@ -85,7 +85,7 @@ export function useAREngine(): UseAREngineReturn {
   const [worldTrackingStatus, setWorldTrackingStatus] = useState<'NORMAL' | 'LIMITED' | 'SIMULATION'>(
     isSimulation ? 'SIMULATION' : 'LIMITED'
   );
-  const [surfaceGuidance, setSurfaceGuidance] = useState('Giữ camera ổn định trên mặt sàn');
+  const [surfaceGuidance, setSurfaceGuidance] = useState('Hold the camera steady over the floor');
 
   // Engine references kept outside React state for 60fps performance
   const sceneRef = useRef<SerumScene | null>(null);

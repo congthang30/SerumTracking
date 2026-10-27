@@ -73,13 +73,6 @@ const CheckSparkleIcon: React.FC = () => (
   </svg>
 );
 
-const SearchPlaneIcon: React.FC = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <ellipse cx="12" cy="15" rx="9" ry="4.5" stroke="currentColor" strokeWidth="1.6" strokeDasharray="3 2" />
-    <path d="M12 4V11M8 7.5L12 11.5L16 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = ({
   hasTargetFound,
   isCameraLocked,
@@ -124,14 +117,11 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
             </button>
           ) : (
             <div className={`surface-guidance-pill ${trackingStatus === 'LIMITED' ? 'tracking-limited' : ''}`}>
-              <span className="guidance-icon-wrap">
-                <SearchPlaneIcon />
-              </span>
               <span className={`guidance-dot ${trackingStatus === 'LIMITED' ? 'warning' : ''}`} />
               <span className="guidance-text">
                 {guidanceText || (trackingStatus === 'LIMITED'
-                  ? 'Đang ổn định SLAM camera...'
-                  : 'Lia camera xuống sàn')}
+                  ? 'Waiting for camera tracking...'
+                  : 'Point the camera at the floor')}
               </span>
             </div>
           )}
@@ -147,8 +137,9 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
                 <CheckSparkleIcon />
               </span>
               <div className="toast-text-group">
-                <span className="toast-title">Đã mở lock camera</span>
-                <span className="toast-sub">Dùng 2 ngón tay để phóng to hoặc thu nhỏ</span>
+                <span className="toast-title">Camera unlocked</span>
+                <span className="toast-sub">Pinch with two fingers to resize</span>
+                <span className="toast-sub">Tap the molecules to view details</span>
               </div>
             </div>
           )}

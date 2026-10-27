@@ -420,12 +420,6 @@
   pointer-events: none;
 }
 
-.guidance-icon-wrap {
-  display: flex;
-  align-items: center;
-  color: var(--color-gold);
-}
-
 .guidance-dot {
   width: 7px;
   height: 7px;
