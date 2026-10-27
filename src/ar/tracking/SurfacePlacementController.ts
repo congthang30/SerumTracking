@@ -8,11 +8,16 @@ export interface SurfaceHit {
 }
 
 export class SurfacePlacementController {
+  /** Target real-world height of the product when placed on surface (exactly 20cm / 0.20m). */
+  public static readonly TARGET_PLACED_HEIGHT_METERS = 0.20;
+
   private scene: THREE.Scene | null = null;
   private camera: THREE.Camera | null = null;
   private productRoot: THREE.Group | null = null;
   private worldAnchorGroup: THREE.Group | null = null;
   private isSimulation = false;
+  private normalizedModelWidth = 0.725;
+  private normalizedModelHeight = 0.612157;
 
   // 3D Reticle components
   private reticleGroup: THREE.Group;
@@ -31,6 +36,7 @@ export class SurfacePlacementController {
   private readonly targetHitPosition = new THREE.Vector3();
   private lastPlaneY = 0;
   private hasCalibratedPlane = false;
+  private initialPosterPosition: THREE.Vector3 | null = null;
 
   // Placement glide animation
   private isAnimatingPlacement = false;
@@ -52,22 +58,41 @@ export class SurfacePlacementController {
     camera: THREE.Camera,
     productRoot: THREE.Group,
     worldAnchorGroup: THREE.Group,
-    isSimulation = false
+    isSimulation = false,
+    normalizedModelWidth = 0.725,
+    normalizedModelHeight = 0.612157
   ) {
     this.scene = scene;
     this.camera = camera;
     this.productRoot = productRoot;
     this.worldAnchorGroup = worldAnchorGroup;
     this.isSimulation = isSimulation;
+    this.normalizedModelWidth = normalizedModelWidth || 0.725;
+    this.normalizedModelHeight = normalizedModelHeight || 0.612157;
     this.isTargetFound = isSimulation; // In simulation mode, start ready; in real AR, wait until target image is scanned
 
     this.reticleGroup = this.createReticleMesh();
     this.scene.add(this.reticleGroup);
   }
 
-  public setTargetFound(found: boolean): void {
+  public setTargetFound(found: boolean, initialPosePosition?: THREE.Vector3): void {
     this.isTargetFound = found;
-    if (!found) {
+    if (found) {
+      if (initialPosePosition) {
+        // Lock plane height directly to the scanned poster on the tabletop!
+        this.lastPlaneY = initialPosePosition.y;
+        this.hasCalibratedPlane = true;
+        this.initialPosterPosition = initialPosePosition.clone();
+        this.targetHitPosition.copy(initialPosePosition);
+        if (this.reticleGroup) {
+          this.reticleGroup.position.copy(initialPosePosition);
+          this.reticleGroup.visible = true;
+        }
+        this.hasSurface = true;
+        this.canPlace = true;
+        this.onPlacementChanged?.(this.isPlaced, true);
+      }
+    } else {
       this.canPlace = false;
       this.hasSurface = false;
       if (this.reticleGroup) {
@@ -109,8 +134,16 @@ export class SurfacePlacementController {
     group.name = 'SurfaceReticleGroup';
     group.visible = false;
 
+    // Reticle radius proportioned to match the 20cm-tall product footprint (width ~23.7cm, radius ~11.8cm)
+    const targetScale = this.normalizedModelHeight > 0
+      ? SurfacePlacementController.TARGET_PLACED_HEIGHT_METERS / this.normalizedModelHeight
+      : 0.327;
+    const footprintRadius = Math.max(0.10, (this.normalizedModelWidth * targetScale) / 2); // ~0.118m (11.8cm radius, 23.7cm diameter)
+
     // 1. Outer Ring: Luxury Champagne Rose Gold
-    const ringGeo = new THREE.RingGeometry(0.16, 0.176, 48);
+    const ringInner = footprintRadius * 0.90; // ~0.107m
+    const ringOuter = footprintRadius * 1.02; // ~0.121m
+    const ringGeo = new THREE.RingGeometry(ringInner, ringOuter, 48);
     const ringMat = new THREE.MeshBasicMaterial({
       color: 0xf5dfd0,
       transparent: true,
@@ -123,7 +156,7 @@ export class SurfacePlacementController {
     group.add(this.reticleRing);
 
     // 2. Inner Disc: Soft Translucent Pearl Fill
-    const discGeo = new THREE.RingGeometry(0.0, 0.155, 36);
+    const discGeo = new THREE.RingGeometry(0.0, ringInner * 0.96, 36);
     const discMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -137,7 +170,7 @@ export class SurfacePlacementController {
     group.add(this.reticleInner);
 
     // 3. Center Target Dot
-    const dotGeo = new THREE.RingGeometry(0.0, 0.022, 24);
+    const dotGeo = new THREE.RingGeometry(0.0, 0.016, 24);
     const dotMat = new THREE.MeshBasicMaterial({
       color: 0xfff6ec,
       transparent: true,
@@ -151,6 +184,7 @@ export class SurfacePlacementController {
     group.add(this.reticleCenterDot);
 
     // 4. Outer Accent Ticks (4 precision focus marks)
+    const tickDist = footprintRadius * 1.22; // ~0.145m
     const tickMat = new THREE.MeshBasicMaterial({
       color: 0xe5c4a5,
       transparent: true,
@@ -160,10 +194,10 @@ export class SurfacePlacementController {
     });
     for (let i = 0; i < 4; i++) {
       const angle = (i * Math.PI) / 2;
-      const tickGeo = new THREE.PlaneGeometry(0.016, 0.038);
+      const tickGeo = new THREE.PlaneGeometry(0.012, 0.026);
       const tick = new THREE.Mesh(tickGeo, tickMat);
       tick.rotation.x = -Math.PI / 2;
-      tick.position.set(Math.cos(angle) * 0.208, 0.0006, Math.sin(angle) * 0.208);
+      tick.position.set(Math.cos(angle) * tickDist, 0.0006, Math.sin(angle) * tickDist);
       tick.rotation.z = -angle;
       group.add(tick);
     }
@@ -218,15 +252,13 @@ export class SurfacePlacementController {
     if (surfaceHit) {
       this.targetHitPosition.copy(surfaceHit.position);
       this.hasSurface = true;
-      this.lastPlaneY = surfaceHit.position.y;
-      this.hasCalibratedPlane = true;
 
       if (!this.reticleGroup.visible) {
         this.reticleGroup.position.copy(surfaceHit.position);
         this.reticleGroup.visible = true;
       } else {
         // Smooth 60fps lerp towards detected surface point
-        this.reticleGroup.position.lerp(surfaceHit.position, 0.28);
+        this.reticleGroup.position.lerp(surfaceHit.position, 0.25);
       }
 
       if (!this.canPlace) {
@@ -250,34 +282,32 @@ export class SurfacePlacementController {
 
     // 1. Real 8th Wall AR Mode
     if (!this.isSimulation) {
+      const camPos = new THREE.Vector3();
+      const camDir = new THREE.Vector3();
+      this.camera.getWorldPosition(camPos);
+      this.camera.getWorldDirection(camDir);
+
+      // Try 8th Wall hitTest first to refine the table plane height if available
       const XR8 = (window as any).XR8;
       if (XR8?.XrController?.hitTest) {
-        // In 8th Wall, hitTest uses normalized screen coordinates (0.0 to 1.0)
-        // (0.5, 0.5) corresponds to the optical center of the camera
         try {
-          const hits = XR8.XrController.hitTest(0.5, 0.5, ['FEATURE_POINT']);
+          const hits = XR8.XrController.hitTest(0.5, 0.5, ['DETECTED_SURFACE', 'ESTIMATED_SURFACE', 'FEATURE_POINT']);
           if (hits && hits.length > 0) {
             for (const hit of hits) {
               if (!hit?.position) continue;
-              const px = hit.position.x;
               const py = hit.position.y;
-              const pz = hit.position.z;
-              if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
+              if (!Number.isFinite(py)) continue;
               const dist = typeof hit.distance === 'number' ? hit.distance : 1.0;
-              // Ideal tabletop/floor AR placement range: 0.35m to 2.2m
-              if (dist >= 0.35 && dist <= 2.2) {
-                const hitPos = new THREE.Vector3(px, py, pz);
+              // Accept hits in a plausible tabletop distance
+              if (dist >= 0.40 && dist <= 1.60) {
                 if (!this.hasCalibratedPlane) {
-                  this.lastPlaneY = hitPos.y;
+                  this.lastPlaneY = py;
                   this.hasCalibratedPlane = true;
-                } else {
-                  this.lastPlaneY = THREE.MathUtils.lerp(this.lastPlaneY, hitPos.y, 0.15);
+                } else if (Math.abs(py - this.lastPlaneY) < 0.20) {
+                  // Gently refine table plane height without sudden jumps
+                  this.lastPlaneY = THREE.MathUtils.lerp(this.lastPlaneY, py, 0.08);
                 }
-                return {
-                  position: hitPos,
-                  normal: new THREE.Vector3(0, 1, 0),
-                  distance: dist,
-                };
+                break;
               }
             }
           }
@@ -286,42 +316,28 @@ export class SurfacePlacementController {
         }
       }
 
-      // Robust fallback: raycast along camera direction towards calibrated/estimated ground plane
-      const camPos = new THREE.Vector3();
-      const camDir = new THREE.Vector3();
-      this.camera.getWorldPosition(camPos);
-      this.camera.getWorldDirection(camDir);
+      // Stable Tabletop Plane Intersection:
+      // Uses the real table plane height calibrated directly from the physical image target
+      const planeY = this.hasCalibratedPlane ? this.lastPlaneY : (camPos.y - 0.55);
 
-      if (camDir.y < -0.08) {
-        const planeY = this.hasCalibratedPlane ? this.lastPlaneY : camPos.y - 0.70;
-        if (camPos.y > planeY) {
-          const t = (planeY - camPos.y) / camDir.y;
-          // Clamp distance to a comfortable tabletop/floor range (0.35m to 2.0m)
-          // Prevents placing the model 3-4 meters away where it appears tiny!
-          if (t >= 0.35 && t <= 2.0) {
-            return {
-              position: new THREE.Vector3(
-                camPos.x + camDir.x * t,
-                planeY,
-                camPos.z + camDir.z * t
-              ),
-              normal: new THREE.Vector3(0, 1, 0),
-              distance: t,
-            };
-          } else if (t > 2.0) {
-            // When user looks far ahead, anchor the reticle comfortably at 1.35m along ground plane
-            const clampedT = 1.35;
-            return {
-              position: new THREE.Vector3(
-                camPos.x + camDir.x * clampedT,
-                planeY,
-                camPos.z + camDir.z * clampedT
-              ),
-              normal: new THREE.Vector3(0, 1, 0),
-              distance: clampedT,
-            };
-          }
-        }
+      if (camPos.y > planeY) {
+        // Calculate raw distance along camera forward vector to reach the table plane
+        const rawT = camDir.y < -0.05 ? (planeY - camPos.y) / camDir.y : 0.70;
+
+        // Strictly clamp distance to the golden tabletop range: 0.60m to 0.85m
+        // This guarantees that the 20cm product ALWAYS appears at a consistent, natural tabletop size!
+        // No more "lúc thì to lúc thì nhỏ" caused by erratic raycast distances!
+        const clampedT = Math.min(0.85, Math.max(0.60, rawT));
+
+        return {
+          position: new THREE.Vector3(
+            camPos.x + camDir.x * clampedT,
+            planeY,
+            camPos.z + camDir.z * clampedT
+          ),
+          normal: new THREE.Vector3(0, 1, 0),
+          distance: clampedT,
+        };
       }
       return null;
     }
@@ -334,8 +350,10 @@ export class SurfacePlacementController {
 
     const planeY = 0;
     if (camPos.y > planeY && camDir.y < -0.01) {
-      const t = (planeY - camPos.y) / camDir.y;
-      if (t > 0.1 && t < 10.0) {
+      const rawT = (planeY - camPos.y) / camDir.y;
+      if (rawT > 0.1 && rawT < 10.0) {
+        // Clamp distance in simulation mode to comfortable tabletop range (0.65m - 0.85m)
+        const t = Math.min(0.85, Math.max(0.65, rawT));
         return {
           position: new THREE.Vector3(
             camPos.x + camDir.x * t,
@@ -373,8 +391,11 @@ export class SurfacePlacementController {
       this.animEndQuat.identity();
     }
 
-    // Target scale in world space: 1.35x for a prominent, luxurious presentation on tabletop or floor
-    this.animEndScale.set(1.35, 1.35, 1.35);
+    // Target scale in world space: fixed real-world height of exactly 20cm (0.20m)
+    const placedScale = this.normalizedModelHeight > 0
+      ? SurfacePlacementController.TARGET_PLACED_HEIGHT_METERS / this.normalizedModelHeight
+      : 0.3267;
+    this.animEndScale.set(placedScale, placedScale, placedScale);
 
     // Disable frustum culling on all child meshes so model never vanishes when camera gets close
     this.productRoot.traverse((child) => {
@@ -412,7 +433,9 @@ export class SurfacePlacementController {
     this.canPlace = false;
     this.isPlaced = true;
 
-    logger.log('info', `[SURFACE_PLACEMENT] 📍 Placed product at (${this.animEndPos.x.toFixed(3)}, ${this.animEndPos.y.toFixed(3)}, ${this.animEndPos.z.toFixed(3)}). Camera unlocked.`);
+    const realHeightCm = (this.normalizedModelHeight * placedScale * 100).toFixed(1);
+    const realWidthCm = (this.normalizedModelWidth * placedScale * 100).toFixed(1);
+    logger.log('info', `[SURFACE_PLACEMENT] 📍 Placed product at (${this.animEndPos.x.toFixed(3)}, ${this.animEndPos.y.toFixed(3)}, ${this.animEndPos.z.toFixed(3)}) with scale ${placedScale.toFixed(4)} (real-world size: ${realWidthCm}cm W x ${realHeightCm}cm H). Camera unlocked.`);
     this.onPlacementChanged?.(true, false);
     return true;
   }

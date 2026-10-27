@@ -257,7 +257,9 @@ export function useAREngine(): UseAREngineReturn {
         serumScene.camera,
         serumScene.productRoot,
         serumScene.worldAnchorGroup,
-        isSimulation
+        isSimulation,
+        loadedModel.normalizedSize.x,
+        loadedModel.normalizedSize.y
       );
       surfacePlacementRef.current.onPlacementChanged = (isPlaced, canPlace) => {
         setIsCameraLocked(!isPlaced);
@@ -358,7 +360,7 @@ export function useAREngine(): UseAREngineReturn {
           startModelAnimation();
           timelineRef.current?.start();
           manager.disableImageTargets();
-          surfacePlacementRef.current?.setTargetFound(true);
+          surfacePlacementRef.current?.setTargetFound(true, pose.position);
           setHasTargetFound(true);
         }
       },
@@ -366,7 +368,7 @@ export function useAREngine(): UseAREngineReturn {
         const anchoredNow = trackingRef.current?.handleImageUpdated(pose, 0) ?? false;
         if (anchoredNow) {
           manager.disableImageTargets();
-          surfacePlacementRef.current?.setTargetFound(true);
+          surfacePlacementRef.current?.setTargetFound(true, pose.position);
           setHasTargetFound(true);
         }
       },

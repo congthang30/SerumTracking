@@ -819,10 +819,9 @@ export class ImageTrackingController {
         this.hasPreviousCameraVelocity = false;
       }
       if (isShortStep && isPoseDiscontinuity) {
-        const trackingRecoveryWindowActive = now <= this.worldTrackingRecoveryUntil;
-        const shouldRebase = (this.worldTrackingStatus === 'LIMITED' || trackingRecoveryWindowActive) &&
-          (translationStep >= ImageTrackingController.ORIGIN_SHIFT_REBASE_DISTANCE_M ||
-            rotationStep >= THREE.MathUtils.degToRad(ImageTrackingController.ORIGIN_SHIFT_REBASE_ROTATION_DEG));
+        // Do NOT artificially rebase the world anchor on sudden camera movements or temporary tracking LIMITED state.
+        // In 6DoF AR, camera motion relative to world must NEVER move the placed anchor; doing so causes visible model jumps!
+        const shouldRebase = false;
 
         const rebased = shouldRebase && this.rebaseWorldAnchorForCameraFrameShift(
           this.previousAnchorCameraMatrix,
@@ -1094,20 +1093,20 @@ export class ImageTrackingController {
 
     if (aspect < 1.0) {
       // Mobile portrait mode:
-      // Scale dynamically tuned so side badges (HA and Vitamin C) have comfortable margin as the model rotates
-      const baseScale = 0.76;
+      // Harmonized scale matching the 20cm placed product viewed at comfortable tabletop distance (~0.70m)
+      const baseScale = 0.52;
       const scaleMultiplier = Math.min(1.0, Math.max(0.85, aspect / 0.52));
       const s = baseScale * scaleMultiplier;
 
-      // Position: x=0 (exact horizontal center), y=-0.16 (bottle center at screen center with 1.25x model size), z=-1.14
-      outPos.set(0, -0.16 * (s / 0.76), -1.14);
+      // Position: x=0 (exact horizontal center), y=-0.11 (centered with balanced UI clearance), z=-1.14
+      outPos.set(0, -0.11 * (s / 0.52), -1.14);
       // Down-pitch angle (~6.4°) matching luxury commercial hero view
       outQuat.setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(6.4), 0, 0, 'YXZ')).normalize();
       outScale.set(s, s, s);
     } else {
       // Landscape mode (desktop simulation / tablet landscape):
-      const s = 0.95;
-      outPos.set(0, -0.18, -1.08);
+      const s = 0.58;
+      outPos.set(0, -0.12, -1.08);
       outQuat.setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(6.4), 0, 0, 'YXZ')).normalize();
       outScale.set(s, s, s);
     }

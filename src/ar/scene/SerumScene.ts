@@ -19,6 +19,8 @@ export function applyNearClippingPlaneToXRCamera(
 ): void {
   const perspectiveCamera = camera as THREE.PerspectiveCamera;
   if (!perspectiveCamera || !perspectiveCamera.isPerspectiveCamera) return;
+  // If near plane is already configured to targetNear, avoid mutating projection matrix every frame
+  if (Math.abs(perspectiveCamera.near - targetNear) < 1e-4) return;
   perspectiveCamera.near = targetNear;
 
   const elements = perspectiveCamera.projectionMatrix?.elements;

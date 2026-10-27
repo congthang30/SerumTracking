@@ -142,57 +142,20 @@ export class EightWallManager {
       return false;
     }
 
-    const XR8 = (window as any).XR8;
-    if (typeof XR8?.XrController?.configure !== 'function') {
-      traceAR('IMAGE_TARGET_CLEAR_FAILED', { error: 'XR8.XrController.configure is unavailable.' }, 'error');
-      return false;
-    }
-
-    // Block app callbacks immediately, then apply the new target list after the
-    // current XR8 image event has finished dispatching.
+    // Block image target events at the application level to prevent conflicts with 6DoF World Tracking,
+    // while deliberately keeping XR8.XrController configuration intact. Reconfiguring imageTargetData: []
+    // during an active camera session resets 8th Wall's SLAM coordinate origin, which causes severe position jumping!
     this.imageTargetClearRequested = true;
-    traceAR('IMAGE_TARGET_CLEAR_SCHEDULED', {
-      requestedTargetCount: 0,
-      previousConfiguredTargetCount: this.configuredImageTargetCount,
-      applyAfterCurrentImageEvent: true,
-      worldTracking: 'left enabled; disableWorldTracking remains false',
+    this.imageTargetClearConfigured = true;
+    this.imageTargetClearConfiguredAt = performance.now();
+    traceAR('IMAGE_TARGET_EVENTS_DISABLED', {
+      imageEventsIgnored: true,
+      slamOriginProtected: true,
+      worldTracking: 'remains enabled with continuous coordinate system',
       runtimeVersion: this.runtimeVersion,
     });
-    reportCameraDiagnostic('Image Tracking', 'Clear scheduled after world anchor; checking that XR8 stops target events.');
-    logger.log('info', '[8TH_WALL] Scheduled Image Target clear after handoff; World Tracking remains enabled.');
-
-    this.pendingImageTargetClearFrame = window.requestAnimationFrame(() => {
-      this.pendingImageTargetClearFrame = null;
-      if (!this.running) return;
-      try {
-        XR8.XrController.configure({ imageTargetData: [] });
-        this.imageTargetClearConfigured = true;
-        this.imageTargetClearConfiguredAt = performance.now();
-        traceAR('IMAGE_TARGET_CLEAR_CONFIGURED', {
-          requestedTargetCount: 0,
-          configureCallReturned: true,
-          previousConfiguredTargetCount: this.configuredImageTargetCount,
-          elapsedSinceSessionStartMs: this.arSessionStartedAt > 0 ? Math.round(performance.now() - this.arSessionStartedAt) : null,
-          worldTracking: 'left enabled; disableWorldTracking remains false',
-          runtimeVersion: this.runtimeVersion,
-        });
-        this.imageTargetClearVerificationTimer = window.setTimeout(() => {
-          this.imageTargetClearVerificationTimer = null;
-          const eventsObserved = this.imageEventsAfterClearConfigured;
-          traceAR('IMAGE_TARGET_CLEAR_VERIFICATION', {
-            configureCallReturned: true,
-            observationWindowMs: 2000,
-            imageEventsObserved: eventsObserved,
-            result: eventsObserved === 0 ? 'no image events observed' : 'image events still emitted',
-            worldTracking: 'remains enabled',
-          }, eventsObserved === 0 ? 'info' : 'warn');
-        }, 2000);
-      } catch (error) {
-        traceAR('IMAGE_TARGET_CLEAR_FAILED', { error: String(error) }, 'error');
-        reportCameraDiagnostic('Image Tracking', `clear failed after handoff: ${String(error)}`);
-        logger.log('error', `[8TH_WALL] Failed to clear Image Targets after handoff: ${String(error)}`);
-      }
-    });
+    reportCameraDiagnostic('Image Tracking', 'Image target events safely muted; SLAM coordinate origin protected.');
+    logger.log('info', '[8TH_WALL] Image target events safely muted after handoff; SLAM coordinate origin protected.');
     return true;
   }
 
