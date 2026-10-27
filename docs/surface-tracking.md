@@ -8,4 +8,6 @@ Sau khi đặt, model vẫn thuộc world anchor. Ground Grid Preview không ghi
 
 Model sau khi đặt có chiều cao mục tiêu 30 cm, gấp 1,5 lần mức 20 cm trước đó. Kích thước trước khi đặt trong chế độ camera lock không đổi.
 
+Sau khi đặt xong, dùng hai ngón tay kéo ra/vào trên vùng camera để phóng to/thu nhỏ model từ 0,5 đến 2 lần kích thước đặt ban đầu. Gesture chỉ đổi scale của model; vị trí và góc xoay trong world anchor giữ nguyên. Kích thước người dùng chọn được giữ khi dùng “Đổi vị trí” để đặt lại. Kéo một ngón vẫn xoay chai; thao tác hai ngón không kích hoạt chạm để đặt hoặc mở thông tin thành phần.
+
 Kiểm tra mã: `npm run test:surface` và `npm run build`.

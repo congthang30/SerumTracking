@@ -148,7 +148,7 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
               </span>
               <div className="toast-text-group">
                 <span className="toast-title">Đã mở lock camera</span>
-                <span className="toast-sub">Chế độ World Tracking 6DoF đang kích hoạt</span>
+                <span className="toast-sub">Dùng 2 ngón tay để phóng to hoặc thu nhỏ</span>
               </div>
             </div>
           )}

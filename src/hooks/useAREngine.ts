@@ -106,6 +106,11 @@ export function useAREngine(): UseAREngineReturn {
   const pointerDownPosRef = useRef({ x: 0, y: 0 });
   const pointerDownTimeRef = useRef(0);
   const hasDraggedRef = useRef(false);
+  const dragPointerIdRef = useRef<number | null>(null);
+  const activeTouchPointsRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchDistanceRef = useRef<number | null>(null);
+  const pinchUsedRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
   const lastModalOpenTimeRef = useRef(0);
 
   // Simulation mode tabletop poster reference
@@ -274,6 +279,9 @@ export function useAREngine(): UseAREngineReturn {
       };
       surfacePlacementRef.current.onPlacementSettled = (placedMatrix) => {
         trackingRef.current?.notifyPlacementSettled(placedMatrix);
+      };
+      surfacePlacementRef.current.onPlacedTransformChanged = (placedMatrix) => {
+        trackingRef.current?.notifyPlacedTransformChanged(placedMatrix);
       };
 
       // 4. Handle Simulation Mode vs Real 8th Wall AR
@@ -648,9 +656,39 @@ export function useAREngine(): UseAREngineReturn {
 
   // Pointer event listeners for interactive 360-degree rotation in Phase 6 and clicking ingredient molecules
   useEffect(() => {
+    const touchDistance = (): number => {
+      const [a, b] = Array.from(activeTouchPointsRef.current.values());
+      return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+    };
+
+    const resetGesture = () => {
+      activeTouchPointsRef.current.clear();
+      pinchDistanceRef.current = null;
+      pinchUsedRef.current = false;
+      isPointerDownRef.current = false;
+      dragPointerIdRef.current = null;
+    };
+
     const onPointerDown = (e: PointerEvent) => {
       if ((e.target as HTMLElement).closest('.interactive-ui')) return;
+      if (e.pointerType === 'touch' && canvasRef.current?.contains(e.target as Node)) {
+        const points = activeTouchPointsRef.current;
+        points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (points.size >= 2) {
+          pinchUsedRef.current = true;
+          hasDraggedRef.current = true;
+          userRotVelRef.current = 0;
+          suppressClickUntilRef.current = performance.now() + 500;
+          pinchDistanceRef.current = points.size === 2 && surfacePlacementRef.current?.canScalePlacedModel
+            ? touchDistance()
+            : null;
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+      }
+      if (isPointerDownRef.current) return;
       isPointerDownRef.current = true;
+      dragPointerIdRef.current = e.pointerId;
       lastPointerXRef.current = e.clientX;
       pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
       pointerDownTimeRef.current = performance.now();
@@ -659,7 +697,21 @@ export function useAREngine(): UseAREngineReturn {
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (isPointerDownRef.current) {
+      const points = activeTouchPointsRef.current;
+      if (e.pointerType === 'touch' && points.has(e.pointerId)) {
+        points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pinchDistanceRef.current !== null && points.size === 2) {
+          const distance = touchDistance();
+          if (distance > 0 && pinchDistanceRef.current > 0) {
+            surfacePlacementRef.current?.scalePlacedModelBy(distance / pinchDistanceRef.current);
+            pinchDistanceRef.current = distance;
+          }
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+        if (pinchUsedRef.current || points.size > 1) return;
+      }
+      if (isPointerDownRef.current && e.pointerId === dragPointerIdRef.current) {
         const dist = Math.hypot(
           e.clientX - pointerDownPosRef.current.x,
           e.clientY - pointerDownPosRef.current.y
@@ -685,9 +737,25 @@ export function useAREngine(): UseAREngineReturn {
       }
     };
 
-    const onPointerUp = (e: PointerEvent) => {
-      if (!isPointerDownRef.current) return;
+    const finishPointer = (e: PointerEvent, cancelled: boolean) => {
+      if (e.pointerType === 'touch') {
+        activeTouchPointsRef.current.delete(e.pointerId);
+        if (pinchUsedRef.current) {
+          pinchDistanceRef.current = activeTouchPointsRef.current.size === 2 && surfacePlacementRef.current?.canScalePlacedModel
+            ? touchDistance()
+            : null;
+          hasDraggedRef.current = true;
+          suppressClickUntilRef.current = performance.now() + 500;
+          isPointerDownRef.current = false;
+          dragPointerIdRef.current = null;
+          if (activeTouchPointsRef.current.size === 0) pinchUsedRef.current = false;
+          return;
+        }
+      }
+      if (!isPointerDownRef.current || e.pointerId !== dragPointerIdRef.current) return;
       isPointerDownRef.current = false;
+      dragPointerIdRef.current = null;
+      if (cancelled) return;
 
       const duration = performance.now() - pointerDownTimeRef.current;
       if (!hasDraggedRef.current && duration < 500) {
@@ -709,10 +777,13 @@ export function useAREngine(): UseAREngineReturn {
         }
       }
     };
+    const onPointerUp = (e: PointerEvent) => finishPointer(e, false);
+    const onPointerCancel = (e: PointerEvent) => finishPointer(e, true);
 
     const onCanvasClick = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest('.interactive-ui')) return;
       const now = performance.now();
+      if (now < suppressClickUntilRef.current || activeTouchPointsRef.current.size > 0) return;
       if (now - lastModalOpenTimeRef.current < 300) return;
       if (hasDraggedRef.current) return;
 
@@ -732,8 +803,9 @@ export function useAREngine(): UseAREngineReturn {
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
     window.addEventListener('click', onCanvasClick);
+    window.addEventListener('blur', resetGesture);
 
     const onResize = () => {
       sceneRef.current?.handleResize();
@@ -745,11 +817,13 @@ export function useAREngine(): UseAREngineReturn {
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('click', onCanvasClick);
+      window.removeEventListener('blur', resetGesture);
       window.removeEventListener('resize', onResize);
+      resetGesture();
     };
-  }, [findIngredientAtScreenPoint, isSimulation, openIngredientModal]);
+  }, [canPlaceOnSurface, findIngredientAtScreenPoint, isCameraLocked, isSimulation, openIngredientModal, placeOnSurface]);
 
   // Start AR on mobile and the interactive 3D preview on desktops automatically.
   useEffect(() => {

@@ -42,13 +42,32 @@ assert.equal(controller.placeProduct(), false, 'placement is blocked while track
 controller.setTrackingStatus('NORMAL');
 frames(30);
 assert.equal(controller.placeProduct(), true);
+assert.equal(controller.scalePlacedModelBy(1.5), false, 'pinch waits until placement finishes');
 
 await new Promise((resolve) => setTimeout(resolve, 470));
 controller.update(1 / 60);
-const placedMatrix = matrixElements();
 const placedWorldScale = new THREE.Vector3();
 product.getWorldScale(placedWorldScale);
 assert.ok(Math.abs(placedWorldScale.y * 0.612157 - 0.30) < 1e-6, 'placed model height is 1.5x the former 20 cm target');
+const placedPosition = product.getWorldPosition(new THREE.Vector3());
+const placedQuaternion = product.getWorldQuaternion(new THREE.Quaternion());
+let scaledMatrix: THREE.Matrix4 | null = null;
+controller.onPlacedTransformChanged = (matrix) => { scaledMatrix = matrix.clone(); };
+assert.equal(controller.scalePlacedModelBy(1.5), true);
+assert.equal(controller.placedModelScaleMultiplier, 1.5);
+product.getWorldScale(placedWorldScale);
+assert.ok(Math.abs(placedWorldScale.y * 0.612157 - 0.45) < 1e-6, 'pinch enlarges the placed model');
+assert.ok(product.getWorldPosition(new THREE.Vector3()).distanceTo(placedPosition) < 1e-8);
+assert.ok(product.getWorldQuaternion(new THREE.Quaternion()).angleTo(placedQuaternion) < 1e-8);
+assert.deepEqual(scaledMatrix?.elements, matrixElements(), 'tracking receives the new world transform');
+assert.equal(controller.scalePlacedModelBy(100), true);
+assert.equal(controller.placedModelScaleMultiplier, 2, 'pinch scale has an upper bound');
+assert.equal(controller.scalePlacedModelBy(0.001), true);
+assert.equal(controller.placedModelScaleMultiplier, 0.5, 'pinch scale has a lower bound');
+assert.equal(controller.scalePlacedModelBy(3), true);
+const placedMatrix = matrixElements();
+assert.equal(controller.scalePlacedModelBy(-1), false);
+assertMatrixUnchanged(placedMatrix);
 
 camera.position.y = 2.3;
 camera.lookAt(0, 0, -1);
@@ -67,5 +86,14 @@ frames(30);
 assert.equal(controller.hasStablePreview, true, 'preview returns after tracking settles');
 assertMatrixUnchanged(placedMatrix);
 
+controller.relockToCamera();
+assert.equal(controller.canScalePlacedModel, false, 'camera-locked model cannot be pinched');
+frames(30);
+assert.equal(controller.placeProduct(), true);
+await new Promise((resolve) => setTimeout(resolve, 470));
+controller.update(1 / 60);
+product.getWorldScale(placedWorldScale);
+assert.ok(Math.abs(placedWorldScale.y * 0.612157 - 0.45) < 1e-6, 'chosen size persists after repositioning');
+
 controller.dispose();
-console.log('Floor-only preview stability and placed model transform: passed');
+console.log('Floor-only preview, anchored pinch scale, and placed model stability: passed');

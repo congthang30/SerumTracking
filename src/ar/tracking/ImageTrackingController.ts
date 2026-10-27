@@ -1167,6 +1167,12 @@ export class ImageTrackingController {
     logger.log('info', '[AR_ANCHOR] 📍 Surface placement settled. World anchor transform firmly locked.');
   }
 
+  /** Updates the integrity baseline after an intentional user scale change. */
+  public notifyPlacedTransformChanged(placedWorldMatrix: THREE.Matrix4): void {
+    if (!this.isSurfacePlaced) return;
+    this.expectedWorldMatrix = placedWorldMatrix.clone();
+  }
+
   /**
    * Re-locks product back to camera for repositioning.
    */

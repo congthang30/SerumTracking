@@ -28,6 +28,7 @@ export class SurfacePlacementController {
   private isPlaced = false;
   private canPlace = false;
   private hasPreviewIntersection = false;
+  private placedScaleMultiplier = 1;
   private animTime = 0;
 
   // XR8 exposes one ground reference. Preview stays on its Y=0 plane.
@@ -57,6 +58,7 @@ export class SurfacePlacementController {
   // Callback to sync with React UI
   public onPlacementChanged?: (isPlaced: boolean, canPlace: boolean, guidance?: string) => void;
   public onPlacementSettled?: (placedWorldMatrix: THREE.Matrix4) => void;
+  public onPlacedTransformChanged?: (placedWorldMatrix: THREE.Matrix4) => void;
 
   constructor(
     scene: THREE.Scene,
@@ -129,6 +131,29 @@ export class SurfacePlacementController {
 
   public get isProductPlaced(): boolean {
     return this.isPlaced;
+  }
+
+  public get canScalePlacedModel(): boolean {
+    return this.isPlaced && !this.isAnimatingPlacement && this.productRoot?.parent === this.worldAnchorGroup;
+  }
+
+  public get placedModelScaleMultiplier(): number {
+    return this.placedScaleMultiplier;
+  }
+
+  /** Applies a two-finger pinch ratio without changing the placed model's position or orientation. */
+  public scalePlacedModelBy(ratio: number): boolean {
+    if (!this.canScalePlacedModel || !this.productRoot || !Number.isFinite(ratio) || ratio <= 0) return false;
+    const next = THREE.MathUtils.clamp(this.placedScaleMultiplier * ratio, 0.5, 2);
+    if (Math.abs(next - this.placedScaleMultiplier) < 1e-4) return true;
+
+    this.productRoot.scale.multiplyScalar(next / this.placedScaleMultiplier);
+    this.placedScaleMultiplier = next;
+    this.reticleGroup.scale.setScalar(next);
+    this.productRoot.updateMatrix();
+    this.productRoot.updateWorldMatrix(true, true);
+    this.onPlacedTransformChanged?.(this.productRoot.matrixWorld);
+    return true;
   }
 
   public get isPlacementReady(): boolean {
@@ -374,8 +399,8 @@ export class SurfacePlacementController {
 
     // Target scale in world space: 30 cm, 1.5x the previous placed size.
     const placedScale = this.normalizedModelHeight > 0
-      ? SurfacePlacementController.TARGET_PLACED_HEIGHT_METERS / this.normalizedModelHeight
-      : 0.4901;
+      ? (SurfacePlacementController.TARGET_PLACED_HEIGHT_METERS / this.normalizedModelHeight) * this.placedScaleMultiplier
+      : 0.4901 * this.placedScaleMultiplier;
     this.animEndScale.set(placedScale, placedScale, placedScale);
 
     // Disable frustum culling on all child meshes so model never vanishes when camera gets close
