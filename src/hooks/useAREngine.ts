@@ -463,9 +463,10 @@ export function useAREngine(): UseAREngineReturn {
     surfacePlacementRef.current?.update(safeDt);
     const scene = sceneRef.current;
 
-    // Keep 3D Plane Grid aligned with calibrated tabletop plane height
+    // Keep 3D Plane Grid aligned with the real detected surface position (Y, X, Z)
     if (scene && surfacePlacementRef.current) {
-      scene.setPlaneGridPosition(surfacePlacementRef.current.planeY);
+      const p = surfacePlacementRef.current.currentSurfacePosition;
+      scene.setPlaneGridPosition(p.y, p.x, p.z);
     }
 
     // Zero-overhead sampling for AR 6DoF Diagnostics HUD
