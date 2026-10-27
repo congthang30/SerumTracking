@@ -239,8 +239,8 @@ export class SerumScene {
     }
   }
 
-  public setPlaneGridPosition(y: number, x = 0, z = 0): void {
-    this.planeDebugGrid.position.set(x, y + 0.0005, z);
+  public setPlaneGridPosition(x: number, y: number, z: number): void {
+    this.planeDebugGrid.position.set(x, y + 0.001, z);
   }
 
   public setPlaneGridVisible(visible: boolean): void {

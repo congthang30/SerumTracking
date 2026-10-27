@@ -32,16 +32,17 @@ export class SurfacePlacementController {
   private hasSurface = false;
   private animTime = 0;
 
-  // Surface tracking
+  // Surface tracking & plane estimation
   private readonly targetHitPosition = new THREE.Vector3();
-  private lastPlaneY = 0;
-  private hasCalibratedPlane = false;
-  private initialPosterPosition: THREE.Vector3 | null = null;
+  private smoothedPlaneY = 0;
+  private hasEstablishedPlane = false;
+  private candidatePlaneY = 0;
+  private candidateSampleCount = 0;
   private lastHitDistance = 0;
   private cameraPitchTooHigh = false;
   private worldTrackingStatus: 'NORMAL' | 'LIMITED' = 'LIMITED';
   private worldTrackingReason = 'INITIALIZING';
-  private currentGuidance = 'Lia camera tới mặt phẳng bàn';
+  private currentGuidance = 'Lia camera tới mặt bàn hoặc sàn';
   private lastReportedGuidance = '';
 
   // Placement glide animation
@@ -115,7 +116,7 @@ export class SurfacePlacementController {
   }
 
   public get planeY(): number {
-    return this.lastPlaneY;
+    return this.smoothedPlaneY;
   }
 
   public get currentSurfacePosition(): THREE.Vector3 {
@@ -123,7 +124,7 @@ export class SurfacePlacementController {
   }
 
   public get isPlaneCalibrated(): boolean {
-    return this.hasCalibratedPlane;
+    return this.hasEstablishedPlane;
   }
 
   public get hitDistance(): number {
@@ -327,82 +328,103 @@ export class SurfacePlacementController {
       }
       this.cameraPitchTooHigh = false;
 
-      // Check 2: Try 8th Wall SLAM Physical Hit-Testing on real environment surfaces
+      // Check 2: Sample 8th Wall SLAM Physical Hit-Testing on real environment surfaces
       const XR8 = (window as any).XR8;
-      let physicalHit: THREE.Vector3 | null = null;
+      let rawHitPoint: THREE.Vector3 | null = null;
       if (XR8?.XrController?.hitTest) {
         try {
-          const centerX = typeof window !== 'undefined' ? window.innerWidth * 0.5 : 0;
-          const centerY = typeof window !== 'undefined' ? window.innerHeight * 0.5 : 0;
-          let hits = XR8.XrController.hitTest(centerX, centerY) || [];
+          const w = typeof window !== 'undefined' ? window.innerWidth : 400;
+          const h = typeof window !== 'undefined' ? window.innerHeight : 800;
+          let hits = XR8.XrController.hitTest(w * 0.5, h * 0.5) || [];
           if (!hits.length) {
-            hits = XR8.XrController.hitTest(centerX, centerY, ['FEATURE_POINT']) || [];
+            hits = XR8.XrController.hitTest(w * 0.5, h * 0.5, ['FEATURE_POINT']) || [];
           }
           if (!hits.length) {
             hits = XR8.XrController.hitTest() || [];
           }
 
           if (hits && hits.length > 0) {
-            for (const h of hits) {
-              if (!h?.position) continue;
-              const px = h.position.x;
-              const py = h.position.y;
-              const pz = h.position.z;
+            for (const hit of hits) {
+              if (!hit?.position) continue;
+              const px = hit.position.x;
+              const py = hit.position.y;
+              const pz = hit.position.z;
               if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
               // A real surface (desk or floor) is physically below the camera level
-              if (py < camPos.y - 0.05) {
-                physicalHit = new THREE.Vector3(px, py, pz);
+              if (py < camPos.y - 0.08) {
+                rawHitPoint = new THREE.Vector3(px, py, pz);
                 break;
               }
             }
           }
         } catch {
-          physicalHit = null;
+          rawHitPoint = null;
         }
       }
 
-      // If 8th Wall detected a physical surface hit directly in view:
-      if (physicalHit) {
-        const dist = camPos.distanceTo(physicalHit);
-        if (dist >= 0.15 && dist <= 3.5) {
-          // Update plane height to this real detected surface
-          this.lastPlaneY = physicalHit.y;
-          this.hasCalibratedPlane = true;
-          this.lastHitDistance = dist;
-          this.currentGuidance = 'Đặt sản phẩm tại đây';
-          return {
-            position: physicalHit,
-            normal: new THREE.Vector3(0, 1, 0),
-            distance: dist,
-          };
-        }
-      }
-
-      // Check 3: If no instant SLAM hit, fall back to raycasting against previously calibrated surface height
-      if (this.hasCalibratedPlane) {
-        const planeY = this.lastPlaneY;
-        if (camPos.y > planeY + 0.05) {
-          const rawT = (planeY - camPos.y) / camDir.y;
-          if (rawT >= 0.15 && rawT <= 3.0) {
-            const hitPos = new THREE.Vector3(
-              camPos.x + camDir.x * rawT,
-              planeY,
-              camPos.z + camDir.z * rawT
-            );
-            this.lastHitDistance = rawT;
-            this.currentGuidance = 'Đặt sản phẩm tại đây';
-            return {
-              position: hitPos,
-              normal: new THREE.Vector3(0, 1, 0),
-              distance: rawT,
-            };
+      // Check 3: Robust Plane Height Estimator with Outlier Rejection
+      if (rawHitPoint) {
+        if (!this.hasEstablishedPlane) {
+          // Initialize plane height from first physical SLAM surface hit
+          this.smoothedPlaneY = rawHitPoint.y;
+          this.hasEstablishedPlane = true;
+          this.candidateSampleCount = 0;
+        } else {
+          const deltaY = Math.abs(rawHitPoint.y - this.smoothedPlaneY);
+          if (deltaY <= 0.18) {
+            // Consistent with current surface: smooth filter to eliminate any jitter
+            this.smoothedPlaneY = THREE.MathUtils.lerp(this.smoothedPlaneY, rawHitPoint.y, 0.08);
+            this.candidateSampleCount = 0;
+          } else {
+            // New surface height candidate (e.g. user moved camera from desk to floor or vice-versa)
+            if (this.candidateSampleCount === 0 || Math.abs(rawHitPoint.y - this.candidatePlaneY) > 0.12) {
+              this.candidatePlaneY = rawHitPoint.y;
+              this.candidateSampleCount = 1;
+            } else {
+              this.candidateSampleCount++;
+              if (this.candidateSampleCount >= 6) {
+                // Verified consistent new surface: transition plane height smoothly
+                this.smoothedPlaneY = THREE.MathUtils.lerp(this.smoothedPlaneY, rawHitPoint.y, 0.25);
+                this.candidateSampleCount = 0;
+              }
+            }
           }
         }
       }
 
-      // Check 4: No surface has been found yet by SLAM
-      this.currentGuidance = 'Lia camera quét mặt bàn hoặc sàn nhà';
-      return null;
+      // Check 4: Raycast onto the Stable Ground Plane
+      if (!this.hasEstablishedPlane) {
+        this.currentGuidance = 'Lia camera quét mặt bàn hoặc sàn nhà';
+        return null;
+      }
+
+      const planeY = this.smoothedPlaneY;
+
+      if (camPos.y <= planeY + 0.05) {
+        this.currentGuidance = 'Nâng camera cao hơn mặt phẳng';
+        return null;
+      }
+
+      const rawT = (planeY - camPos.y) / camDir.y;
+      if (rawT < 0.15 || rawT > 4.0) {
+        this.currentGuidance = rawT > 4.0
+          ? 'Đưa camera lại gần mặt phẳng'
+          : 'Nâng camera cao hơn một chút';
+        return null;
+      }
+
+      const hitX = camPos.x + camDir.x * rawT;
+      const hitZ = camPos.z + camDir.z * rawT;
+      const hitPosition = new THREE.Vector3(hitX, planeY, hitZ);
+
+      this.lastHitDistance = rawT;
+      this.currentGuidance = 'Đặt sản phẩm tại đây';
+
+      return {
+        position: hitPosition,
+        normal: new THREE.Vector3(0, 1, 0),
+        distance: rawT,
+      };
     }
 
     // 2. Desktop Simulation Mode: Raycast against horizontal tabletop plane at Y = 0
