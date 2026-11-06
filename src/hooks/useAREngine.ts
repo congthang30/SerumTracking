@@ -31,7 +31,9 @@ export interface UseAREngineReturn {
   startExperience: () => void;
   hasTargetFound: boolean;
   isCameraLocked: boolean;
+  isSurfacePlaced: boolean;
   canPlaceOnSurface: boolean;
+  lockToCameraForPlacement: () => void;
   placeOnSurface: () => void;
   relockToCamera: () => void;
   worldTrackingStatus: 'NORMAL' | 'LIMITED' | 'SIMULATION';
@@ -92,7 +94,8 @@ export function useAREngine(): UseAREngineReturn {
 
   const [hasTargetFound, setHasTargetFound] = useState(isSimulation);
   const [canPlaceOnSurface, setCanPlaceOnSurface] = useState(false);
-  const [isCameraLocked, setIsCameraLocked] = useState(true);
+  const [isCameraLocked, setIsCameraLocked] = useState(isSimulation);
+  const [isSurfacePlaced, setIsSurfacePlaced] = useState(false);
   const [worldTrackingStatus, setWorldTrackingStatus] = useState<'NORMAL' | 'LIMITED' | 'SIMULATION'>(
     isSimulation ? 'SIMULATION' : 'LIMITED'
   );
@@ -163,13 +166,25 @@ export function useAREngine(): UseAREngineReturn {
     if (surfacePlacementRef.current?.placeProduct()) {
       trackingRef.current?.unlockCamera();
       setIsCameraLocked(false);
+      setIsSurfacePlaced(true);
       setCanPlaceOnSurface(false);
     }
+  }, []);
+
+  const lockToCameraForPlacement = useCallback(() => {
+    if (!trackingRef.current?.detachIntoCamera()) return;
+
+    // Stop image-pose writes only after the user chooses to leave Image Tracking.
+    eightWallRef.current?.disableImageTargets();
+    surfacePlacementRef.current?.setTargetFound(true);
+    setIsSurfacePlaced(false);
+    setIsCameraLocked(true);
   }, []);
 
   const relockToCamera = useCallback(() => {
     surfacePlacementRef.current?.relockToCamera();
     trackingRef.current?.relockCamera();
+    setIsSurfacePlaced(false);
     setIsCameraLocked(true);
   }, []);
 
@@ -286,6 +301,7 @@ export function useAREngine(): UseAREngineReturn {
       );
       surfacePlacementRef.current.onPlacementChanged = (isPlaced, canPlace, guidance) => {
         setIsCameraLocked(!isPlaced);
+        setIsSurfacePlaced(isPlaced);
         setCanPlaceOnSurface(canPlace);
         if (guidance) setSurfaceGuidance(guidance);
       };
@@ -368,6 +384,11 @@ export function useAREngine(): UseAREngineReturn {
   ) => {
     const manager = new EightWallManager();
     eightWallRef.current = manager;
+    const onFirstTargetPose = () => {
+      startModelAnimation();
+      timelineRef.current?.start();
+      setHasTargetFound(true);
+    };
 
     await manager.startAR(canvas, {
       onCameraStarted: ({ scene, camera, renderer, runtimeVersion, captureEngine: xrCaptureEngine }) => {
@@ -390,21 +411,11 @@ export function useAREngine(): UseAREngineReturn {
       },
       onTargetFound: (pose) => {
         const firstTargetFound = trackingRef.current?.handleImageFound(pose, 0) ?? false;
-        if (firstTargetFound) {
-          startModelAnimation();
-          timelineRef.current?.start();
-          manager.disableImageTargets();
-          surfacePlacementRef.current?.setTargetFound(true);
-          setHasTargetFound(true);
-        }
+        if (firstTargetFound) onFirstTargetPose();
       },
       onTargetUpdated: (pose) => {
-        const anchoredNow = trackingRef.current?.handleImageUpdated(pose, 0) ?? false;
-        if (anchoredNow) {
-          manager.disableImageTargets();
-          surfacePlacementRef.current?.setTargetFound(true);
-          setHasTargetFound(true);
-        }
+        const firstTargetFound = trackingRef.current?.handleImageUpdated(pose, 0) ?? false;
+        if (firstTargetFound) onFirstTargetPose();
       },
       onTargetLost: () => trackingRef.current?.handleImageLost(),
       onWorldTrackingStatus: (status, reason) => {
@@ -919,7 +930,9 @@ export function useAREngine(): UseAREngineReturn {
     startExperience,
     hasTargetFound,
     isCameraLocked,
+    isSurfacePlaced,
     canPlaceOnSurface,
+    lockToCameraForPlacement,
     placeOnSurface,
     relockToCamera,
     worldTrackingStatus,

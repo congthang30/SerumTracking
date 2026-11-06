@@ -513,8 +513,10 @@
 .surface-reposition-container {
   position: fixed;
   bottom: 34px;
-  right: 20px;
+  left: 50%;
+  right: auto;
   z-index: 48;
+  transform: translateX(-50%);
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;

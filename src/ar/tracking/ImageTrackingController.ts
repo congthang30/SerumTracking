@@ -265,9 +265,6 @@ export class ImageTrackingController {
     }, { bridge: true });
     this.recordApproachDiagnostics();
 
-    // Image Tracking → Camera-Locked: Detach from Image Target and lock directly to AR Camera
-    this.detachIntoCamera();
-
     traceAR('IMAGE_FOUND', {
       target: pose.name,
       firstDetection,
@@ -283,18 +280,21 @@ export class ImageTrackingController {
     return firstDetection;
   }
 
-  /** Once camera-locked, image poses are completely ignored to avoid conflicts. */
+  /** Applies image poses until the user explicitly switches to camera-locked placement. */
   public handleImageUpdated(pose: ImagePose, rotationDeg = 0): boolean {
     if (this.isCameraLocked || this.state === 'ANCHORED' || this.isSurfacePlaced) return false;
     if (this.ignoreImageEvent('imageupdated')) return false;
     if (!this.isValidPose(pose)) return false;
 
+    const firstDetection = !this.hasSeenTarget;
+    this.hasSeenTarget = true;
     this.isTracked = true;
     this.sampleCameraPose('imageupdated');
     this.applyPose(pose, rotationDeg, true);
     this.setTargetVisibility(true, 'image target pose updated');
+    if (firstDetection) this.resetStabilityWindow(pose);
     this.onUpdated?.(pose);
-    return this.detachIntoCamera();
+    return firstDetection;
   }
 
   /** Poster loss never hides or resets the model once locked to camera. */

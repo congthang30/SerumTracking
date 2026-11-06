@@ -16,7 +16,9 @@ const ARExperience: React.FC = () => {
     closeIngredientModal,
     hasTargetFound,
     isCameraLocked,
+    isSurfacePlaced,
     canPlaceOnSurface,
+    lockToCameraForPlacement,
     placeOnSurface,
     relockToCamera,
     worldTrackingStatus,
@@ -37,9 +39,11 @@ const ARExperience: React.FC = () => {
       <SurfacePlacementOverlay
         hasTargetFound={hasTargetFound}
         isCameraLocked={isCameraLocked}
+        isSurfacePlaced={isSurfacePlaced}
         canPlaceOnSurface={canPlaceOnSurface}
         guidanceText={surfaceGuidance}
         trackingStatus={worldTrackingStatus}
+        onLockToCamera={lockToCameraForPlacement}
         onPlace={placeOnSurface}
         onRelock={relockToCamera}
         hasCaptureControls={isCaptureReady}

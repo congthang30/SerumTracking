@@ -3,10 +3,12 @@ import React, { useEffect, useState } from 'react';
 export interface SurfacePlacementOverlayProps {
   hasTargetFound: boolean;
   isCameraLocked: boolean;
+  isSurfacePlaced: boolean;
   canPlaceOnSurface: boolean;
   trackingStatus?: 'NORMAL' | 'LIMITED' | 'SIMULATION';
   guidanceText?: string;
   onPlace: () => void;
+  onLockToCamera: () => void;
   onRelock?: () => void;
   hasCaptureControls?: boolean;
 }
@@ -77,10 +79,12 @@ const CheckSparkleIcon: React.FC = () => (
 export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = ({
   hasTargetFound,
   isCameraLocked,
+  isSurfacePlaced,
   canPlaceOnSurface,
   trackingStatus = 'NORMAL',
   guidanceText,
   onPlace,
+  onLockToCamera,
   onRelock,
   hasCaptureControls = false,
 }) => {
@@ -88,14 +92,14 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
 
   // Show a brief luxury toast notification upon placing into World Tracking
   useEffect(() => {
-    if (hasTargetFound && !isCameraLocked) {
+    if (hasTargetFound && isSurfacePlaced) {
       setShowToast(true);
       const timer = window.setTimeout(() => setShowToast(false), 3400);
       return () => window.clearTimeout(timer);
     } else {
       setShowToast(false);
     }
-  }, [hasTargetFound, isCameraLocked]);
+  }, [hasTargetFound, isCameraLocked, isSurfacePlaced]);
 
   if (!hasTargetFound) {
     return null;
@@ -130,8 +134,25 @@ export const SurfacePlacementOverlay: React.FC<SurfacePlacementOverlayProps> = (
         </div>
       )}
 
+      {/* Keep the model on its image target until the user requests placement. */}
+      {!isCameraLocked && !isSurfacePlaced && (
+        <div className={`surface-reposition-container interactive-ui ${hasCaptureControls ? 'capture-active' : ''}`}>
+          <button
+            className="surface-reposition-btn"
+            onClick={onLockToCamera}
+            aria-label="Move the serum to the floor"
+            title="Lock the serum to the screen, then place it on the floor"
+          >
+            <span className="reposition-icon-wrap">
+              <RepositionIcon />
+            </span>
+            <span className="reposition-text">Move to floor</span>
+          </button>
+        </div>
+      )}
+
       {/* 2. World Tracking Mode: Success Toast & Reposition Control */}
-      {!isCameraLocked && (
+      {!isCameraLocked && isSurfacePlaced && (
         <>
           {showToast && (
             <div className="surface-toast interactive-ui">
